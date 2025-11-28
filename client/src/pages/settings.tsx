@@ -3,9 +3,9 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,6 +17,19 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { 
   Settings as SettingsIcon, 
   Github, 
@@ -27,14 +40,19 @@ import {
   GitBranch,
   Clock,
   AlertCircle,
-  User
+  ChevronsUpDown,
+  Lock,
+  LogOut,
+  Search
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository } from "@shared/schema";
+import type { Repository, GitHubRepo } from "@shared/schema";
 
 export default function Settings() {
-  const [newRepoUrl, setNewRepoUrl] = useState("");
+  const [manualRepoUrl, setManualRepoUrl] = useState("");
+  const [repoSelectOpen, setRepoSelectOpen] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
   const { toast } = useToast();
 
   const { data: repoData, isLoading: repoLoading } = useQuery<{ success: boolean; data: Repository | null }>({
@@ -43,6 +61,10 @@ export default function Settings() {
 
   const { data: userInfo } = useQuery<{ success: boolean; data: { login: string; name: string; avatar_url: string } }>({
     queryKey: ["/api/github/user"],
+  });
+
+  const { data: reposData, isLoading: reposLoading, refetch: refetchRepos } = useQuery<{ success: boolean; data: GitHubRepo[] }>({
+    queryKey: ["/api/github/repos"],
   });
 
   const disconnectMutation = useMutation({
@@ -84,7 +106,8 @@ export default function Settings() {
         queryClient.invalidateQueries({ queryKey: ["/api/repository"] });
         queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
         queryClient.invalidateQueries({ queryKey: ["/api/files"] });
-        setNewRepoUrl("");
+        setManualRepoUrl("");
+        setRepoSelectOpen(false);
       } else {
         toast({
           title: "Connection Failed",
@@ -104,6 +127,16 @@ export default function Settings() {
 
   const repository = repoData?.data;
   const user = userInfo?.data;
+  const repos = reposData?.data || [];
+
+  const filteredRepos = repos.filter(repo =>
+    repo.fullName.toLowerCase().includes(repoSearch.toLowerCase()) ||
+    (repo.description && repo.description.toLowerCase().includes(repoSearch.toLowerCase()))
+  );
+
+  const handleSelectRepo = (fullName: string) => {
+    connectMutation.mutate(fullName);
+  };
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-6">
@@ -123,7 +156,7 @@ export default function Settings() {
             <div className="w-10 h-10 rounded-full bg-[#24292e] flex items-center justify-center">
               <Github className="w-5 h-5 text-white" />
             </div>
-            <div>
+            <div className="flex-1">
               <CardTitle>GitHub Account</CardTitle>
               <CardDescription>Connected GitHub account information</CardDescription>
             </div>
@@ -137,7 +170,7 @@ export default function Settings() {
                 alt={user.name || user.login}
                 className="w-12 h-12 rounded-full"
               />
-              <div>
+              <div className="flex-1">
                 <p className="font-medium" data-testid="text-github-name">{user.name || user.login}</p>
                 <p className="text-sm text-muted-foreground">@{user.login}</p>
               </div>
@@ -152,6 +185,21 @@ export default function Settings() {
               <span>Loading user information...</span>
             </div>
           )}
+          <div className="mt-4 pt-4 border-t border-border">
+            <p className="text-sm text-muted-foreground mb-2">
+              GitHub account is managed through Replit. To switch accounts, reconfigure the GitHub integration in Replit settings.
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              asChild
+            >
+              <a href="https://replit.com" target="_blank" rel="noopener noreferrer">
+                <LogOut className="w-4 h-4 mr-2" />
+                Manage in Replit
+              </a>
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -213,28 +261,93 @@ export default function Settings() {
 
               <div>
                 <h3 className="text-sm font-medium mb-3">Change Repository</h3>
-                <div className="flex gap-2">
-                  <Input
-                    placeholder="owner/repository"
-                    value={newRepoUrl}
-                    onChange={(e) => setNewRepoUrl(e.target.value)}
-                    className="flex-1"
-                    data-testid="input-change-repo"
-                  />
-                  <Button
-                    onClick={() => newRepoUrl && connectMutation.mutate(newRepoUrl)}
-                    disabled={connectMutation.isPending || !newRepoUrl.trim()}
-                    data-testid="button-change-repo"
-                  >
-                    {connectMutation.isPending ? (
-                      <>
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                        Connecting...
-                      </>
-                    ) : (
-                      "Connect"
-                    )}
-                  </Button>
+                <Popover open={repoSelectOpen} onOpenChange={setRepoSelectOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={repoSelectOpen}
+                      className="w-full justify-between"
+                      data-testid="button-select-repo"
+                    >
+                      <span className="text-muted-foreground">Select a repository...</span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[400px] p-0" align="start">
+                    <Command>
+                      <CommandInput 
+                        placeholder="Search repositories..." 
+                        value={repoSearch}
+                        onValueChange={setRepoSearch}
+                      />
+                      <CommandList>
+                        <CommandEmpty>
+                          {reposLoading ? (
+                            <div className="flex items-center justify-center py-4">
+                              <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                              Loading repositories...
+                            </div>
+                          ) : (
+                            "No repository found."
+                          )}
+                        </CommandEmpty>
+                        <CommandGroup>
+                          <ScrollArea className="h-64">
+                            {filteredRepos.map((repo) => (
+                              <CommandItem
+                                key={repo.id}
+                                value={repo.fullName}
+                                onSelect={() => handleSelectRepo(repo.fullName)}
+                                className="cursor-pointer"
+                                data-testid={`repo-option-${repo.name}`}
+                              >
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  <Github className="w-4 h-4 shrink-0" />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-medium truncate">{repo.fullName}</span>
+                                      {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                    </div>
+                                    {repo.description && (
+                                      <p className="text-xs text-muted-foreground truncate">{repo.description}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                {repository?.fullName === repo.fullName && (
+                                  <Check className="w-4 h-4 text-primary shrink-0" />
+                                )}
+                              </CommandItem>
+                            ))}
+                          </ScrollArea>
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+                
+                <div className="mt-3">
+                  <p className="text-xs text-muted-foreground mb-2">Or enter manually:</p>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="owner/repository"
+                      value={manualRepoUrl}
+                      onChange={(e) => setManualRepoUrl(e.target.value)}
+                      className="flex-1"
+                      data-testid="input-change-repo"
+                    />
+                    <Button
+                      onClick={() => manualRepoUrl && connectMutation.mutate(manualRepoUrl)}
+                      disabled={connectMutation.isPending || !manualRepoUrl.trim()}
+                      data-testid="button-change-repo"
+                    >
+                      {connectMutation.isPending ? (
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                      ) : (
+                        "Connect"
+                      )}
+                    </Button>
+                  </div>
                 </div>
               </div>
 
@@ -274,32 +387,97 @@ export default function Settings() {
                 <Github className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                 <p className="font-medium mb-1">No Repository Connected</p>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Enter your Astro blog repository to get started
+                  Select your Astro blog repository to get started
                 </p>
               </div>
               
-              <div className="flex gap-2">
-                <Input
-                  placeholder="owner/repository (e.g., egdevelop/blog-astro)"
-                  value={newRepoUrl}
-                  onChange={(e) => setNewRepoUrl(e.target.value)}
-                  className="flex-1"
-                  data-testid="input-connect-repo"
-                />
-                <Button
-                  onClick={() => newRepoUrl && connectMutation.mutate(newRepoUrl)}
-                  disabled={connectMutation.isPending || !newRepoUrl.trim()}
-                  data-testid="button-connect"
-                >
-                  {connectMutation.isPending ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    "Connect Repository"
-                  )}
-                </Button>
+              <Popover open={repoSelectOpen} onOpenChange={setRepoSelectOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={repoSelectOpen}
+                    className="w-full justify-between"
+                    data-testid="button-select-repo-initial"
+                  >
+                    <span className="text-muted-foreground">Select a repository...</span>
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[400px] p-0" align="start">
+                  <Command>
+                    <CommandInput 
+                      placeholder="Search repositories..." 
+                      value={repoSearch}
+                      onValueChange={setRepoSearch}
+                    />
+                    <CommandList>
+                      <CommandEmpty>
+                        {reposLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                            Loading repositories...
+                          </div>
+                        ) : (
+                          "No repository found."
+                        )}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        <ScrollArea className="h-64">
+                          {filteredRepos.map((repo) => (
+                            <CommandItem
+                              key={repo.id}
+                              value={repo.fullName}
+                              onSelect={() => handleSelectRepo(repo.fullName)}
+                              className="cursor-pointer"
+                              data-testid={`repo-option-${repo.name}`}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Github className="w-4 h-4 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-medium truncate">{repo.fullName}</span>
+                                    {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                  </div>
+                                  {repo.description && (
+                                    <p className="text-xs text-muted-foreground truncate">{repo.description}</p>
+                                  )}
+                                </div>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </ScrollArea>
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+
+              <div>
+                <p className="text-xs text-muted-foreground mb-2">Or enter manually:</p>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="owner/repository (e.g., egdevelop/blog-astro)"
+                    value={manualRepoUrl}
+                    onChange={(e) => setManualRepoUrl(e.target.value)}
+                    className="flex-1"
+                    data-testid="input-connect-repo"
+                  />
+                  <Button
+                    onClick={() => manualRepoUrl && connectMutation.mutate(manualRepoUrl)}
+                    disabled={connectMutation.isPending || !manualRepoUrl.trim()}
+                    data-testid="button-connect"
+                  >
+                    {connectMutation.isPending ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        Connecting...
+                      </>
+                    ) : (
+                      "Connect Repository"
+                    )}
+                  </Button>
+                </div>
               </div>
             </div>
           )}

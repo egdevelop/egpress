@@ -195,3 +195,17 @@ export const aiGenerateSchema = z.object({
 });
 
 export type AIGenerateRequest = z.infer<typeof aiGenerateSchema>;
+
+// GitHub repository info (for listing)
+export const githubRepoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  fullName: z.string(),
+  owner: z.string(),
+  description: z.string(),
+  isPrivate: z.boolean(),
+  defaultBranch: z.string(),
+  updatedAt: z.string().nullable(),
+});
+
+export type GitHubRepo = z.infer<typeof githubRepoSchema>;

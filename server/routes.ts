@@ -186,6 +186,36 @@ export async function registerRoutes(
     }
   });
 
+  // Get user's repositories (paginated)
+  app.get("/api/github/repos", async (req, res) => {
+    try {
+      const octokit = await getGitHubClient();
+      
+      // Fetch all repos using pagination
+      const repos = await octokit.paginate(octokit.repos.listForAuthenticatedUser, {
+        sort: "updated",
+        per_page: 100,
+        affiliation: "owner,collaborator",
+      });
+      
+      const repoList = repos.map(repo => ({
+        id: repo.id.toString(),
+        name: repo.name,
+        fullName: repo.full_name,
+        owner: repo.owner.login,
+        description: repo.description || "",
+        isPrivate: repo.private,
+        defaultBranch: repo.default_branch || "main",
+        updatedAt: repo.updated_at || null,
+      }));
+      
+      res.json({ success: true, data: repoList });
+    } catch (error: any) {
+      console.error("Fetch repos error:", error);
+      res.json({ success: false, error: "Failed to fetch repositories" });
+    }
+  });
+
   // Get connected repository
   app.get("/api/repository", async (req, res) => {
     try {

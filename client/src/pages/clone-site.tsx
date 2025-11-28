@@ -6,8 +6,9 @@ import { z } from "zod";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Form,
   FormControl,
@@ -23,152 +24,166 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { GitBranch, Plus, RefreshCw, CheckCircle, Globe, ArrowRightLeft, AlertCircle } from "lucide-react";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { Copy, Plus, RefreshCw, CheckCircle, ExternalLink, Github, ChevronsUpDown, Lock, Check } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository, BranchInfo } from "@shared/schema";
+import type { Repository, GitHubRepo } from "@shared/schema";
 
-const createSiteFormSchema = z.object({
-  domain: z.string()
-    .min(1, "Domain name is required")
-    .regex(/^[a-zA-Z0-9][a-zA-Z0-9.-]+[a-zA-Z0-9]$/, "Invalid domain format"),
+const cloneFormSchema = z.object({
+  newRepoName: z.string()
+    .min(1, "Repository name is required")
+    .regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/, "Invalid repository name format"),
+  description: z.string().optional(),
+  sourceRepo: z.string().optional(),
 });
 
-type CreateSiteFormValues = z.infer<typeof createSiteFormSchema>;
+type CloneFormValues = z.infer<typeof cloneFormSchema>;
 
 export default function CloneSite() {
-  const [createdBranch, setCreatedBranch] = useState<{ name: string; domain: string } | null>(null);
+  const [clonedRepo, setClonedRepo] = useState<{ name: string; fullName: string; url: string } | null>(null);
+  const [sourceSelectOpen, setSourceSelectOpen] = useState(false);
+  const [sourceSearch, setSourceSearch] = useState("");
   const { toast } = useToast();
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
   });
 
-  const { data: branchesData, isLoading: branchesLoading } = useQuery<{ success: boolean; data: BranchInfo[] }>({
-    queryKey: ["/api/branches"],
-    enabled: !!repoData?.data,
+  const { data: reposData, isLoading: reposLoading } = useQuery<{ success: boolean; data: GitHubRepo[] }>({
+    queryKey: ["/api/github/repos"],
   });
 
-  const form = useForm<CreateSiteFormValues>({
-    resolver: zodResolver(createSiteFormSchema),
+  const form = useForm<CloneFormValues>({
+    resolver: zodResolver(cloneFormSchema),
     defaultValues: {
-      domain: "",
+      newRepoName: "",
+      description: "",
+      sourceRepo: "",
     },
   });
 
-  const createBranchMutation = useMutation({
-    mutationFn: async (data: CreateSiteFormValues) => {
-      const response = await apiRequest("POST", "/api/branches", {
-        domain: data.domain,
+  const cloneMutation = useMutation({
+    mutationFn: async (data: CloneFormValues) => {
+      const sourceRepo = data.sourceRepo || repoData?.data?.fullName;
+      const response = await apiRequest("POST", "/api/clone-repo", {
+        sourceRepo: sourceRepo,
+        newRepoName: data.newRepoName,
+        description: data.description,
       });
       return response.json();
     },
     onSuccess: (data) => {
       if (data.success) {
-        setCreatedBranch(data.data);
-        queryClient.invalidateQueries({ queryKey: ["/api/branches"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/repository"] });
+        setClonedRepo(data.data);
+        form.reset();
+        queryClient.invalidateQueries({ queryKey: ["/api/github/repos"] });
         toast({
-          title: "Site Created",
-          description: `Branch ${data.data.name} created and activated`,
+          title: "Repository Created",
+          description: `${data.data.fullName} has been created successfully`,
         });
       } else {
         toast({
-          title: "Creation Failed",
-          description: data.error || "Failed to create site branch",
+          title: "Clone Failed",
+          description: data.error || "Failed to create repository",
           variant: "destructive",
         });
       }
     },
     onError: () => {
       toast({
-        title: "Creation Failed",
-        description: "An error occurred while creating the branch",
+        title: "Clone Failed",
+        description: "An error occurred while creating the repository",
         variant: "destructive",
       });
     },
   });
 
-  const switchBranchMutation = useMutation({
-    mutationFn: async (branch: string) => {
-      const response = await apiRequest("POST", "/api/branches/switch", { branch });
+  const connectToClonedMutation = useMutation({
+    mutationFn: async (fullName: string) => {
+      const response = await apiRequest("POST", "/api/repository/connect", { url: fullName });
       return response.json();
     },
     onSuccess: (data) => {
       if (data.success) {
+        toast({
+          title: "Connected",
+          description: `Now editing ${data.data.fullName}`,
+        });
         queryClient.invalidateQueries({ queryKey: ["/api/repository"] });
         queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
         queryClient.invalidateQueries({ queryKey: ["/api/files"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/site-config"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/adsense"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/theme"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/pages"] });
-        toast({
-          title: "Branch Switched",
-          description: `Now editing: ${data.data.activeBranch}`,
-        });
-      } else {
-        toast({
-          title: "Switch Failed",
-          description: data.error || "Failed to switch branch",
-          variant: "destructive",
-        });
+        setClonedRepo(null);
       }
     },
     onError: () => {
       toast({
-        title: "Switch Failed",
-        description: "An error occurred while switching branches",
+        title: "Connection Failed",
+        description: "Failed to connect to the new repository",
         variant: "destructive",
       });
     },
   });
 
   const repository = repoData?.data;
-  const branches = branchesData?.data || [];
-  const siteBranches = branches.filter(b => !b.isTemplate);
-  const templateBranch = branches.find(b => b.isTemplate);
+  const repos = reposData?.data || [];
+  const selectedSource = form.watch("sourceRepo") || repository?.fullName || "";
 
-  if (!repository) {
-    return (
-      <div className="p-6 max-w-4xl mx-auto">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="text-center py-8">
-              <AlertCircle className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-medium">No Repository Connected</h3>
-              <p className="text-muted-foreground mt-1">
-                Connect a repository in Settings to create site branches
-              </p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const filteredRepos = repos.filter(repo =>
+    repo.fullName.toLowerCase().includes(sourceSearch.toLowerCase()) ||
+    (repo.description && repo.description.toLowerCase().includes(sourceSearch.toLowerCase()))
+  );
 
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">Sites & Branches</h1>
+        <h1 className="text-3xl font-semibold">Clone Site</h1>
         <p className="text-muted-foreground mt-1">
-          Create and manage site branches from your template
+          Create a new repository by cloning from an existing template
         </p>
       </div>
 
-      {createdBranch && (
+      {clonedRepo && (
         <Alert className="border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800">
           <CheckCircle className="w-4 h-4 text-green-600" />
-          <AlertTitle className="text-green-800 dark:text-green-200">Site Branch Created!</AlertTitle>
+          <AlertTitle className="text-green-800 dark:text-green-200">Repository Created!</AlertTitle>
           <AlertDescription className="text-green-700 dark:text-green-300">
-            Branch <strong>{createdBranch.name}</strong> is now active. 
-            Start customizing your site's content and branding.
+            <p className="mb-3">
+              <strong>{clonedRepo.fullName}</strong> has been created successfully.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => window.open(clonedRepo.url, "_blank")}
+              >
+                <ExternalLink className="w-4 h-4 mr-2" />
+                View on GitHub
+              </Button>
+              <Button
+                size="sm"
+                onClick={() => connectToClonedMutation.mutate(clonedRepo.fullName)}
+                disabled={connectToClonedMutation.isPending}
+              >
+                {connectToClonedMutation.isPending ? (
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Github className="w-4 h-4 mr-2" />
+                )}
+                Connect & Edit
+              </Button>
+            </div>
           </AlertDescription>
         </Alert>
       )}
@@ -177,32 +192,131 @@ export default function CloneSite() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Plus className="w-5 h-5" />
-              Create New Site
+              <Copy className="w-5 h-5" />
+              Clone to New Repository
             </CardTitle>
             <CardDescription>
-              Create a new branch from the template for a new site
+              Create a copy of a template as a new GitHub repository
             </CardDescription>
           </CardHeader>
           <CardContent>
             <Form {...form}>
-              <form onSubmit={form.handleSubmit((data) => createBranchMutation.mutate(data))} className="space-y-4">
+              <form onSubmit={form.handleSubmit((data) => cloneMutation.mutate(data))} className="space-y-4">
                 <FormField
                   control={form.control}
-                  name="domain"
+                  name="sourceRepo"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Domain Name</FormLabel>
+                      <FormLabel>Source Template</FormLabel>
+                      <Popover open={sourceSelectOpen} onOpenChange={setSourceSelectOpen}>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              className="w-full justify-between"
+                              data-testid="button-select-source"
+                            >
+                              <span className={selectedSource ? "" : "text-muted-foreground"}>
+                                {selectedSource || "Select source repository..."}
+                              </span>
+                              <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[350px] p-0" align="start">
+                          <Command>
+                            <CommandInput 
+                              placeholder="Search repositories..." 
+                              value={sourceSearch}
+                              onValueChange={setSourceSearch}
+                            />
+                            <CommandList>
+                              <CommandEmpty>
+                                {reposLoading ? (
+                                  <div className="flex items-center justify-center py-4">
+                                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                                    Loading...
+                                  </div>
+                                ) : (
+                                  "No repository found."
+                                )}
+                              </CommandEmpty>
+                              <CommandGroup>
+                                <ScrollArea className="h-64">
+                                  {filteredRepos.map((repo) => (
+                                    <CommandItem
+                                      key={repo.id}
+                                      value={repo.fullName}
+                                      onSelect={() => {
+                                        field.onChange(repo.fullName);
+                                        setSourceSelectOpen(false);
+                                      }}
+                                      className="cursor-pointer"
+                                    >
+                                      <div className="flex items-center gap-2 flex-1 min-w-0">
+                                        <Github className="w-4 h-4 shrink-0" />
+                                        <div className="min-w-0 flex-1">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-medium truncate">{repo.fullName}</span>
+                                            {repo.isPrivate && <Lock className="w-3 h-3" />}
+                                          </div>
+                                        </div>
+                                      </div>
+                                      {selectedSource === repo.fullName && (
+                                        <Check className="w-4 h-4 text-primary shrink-0" />
+                                      )}
+                                    </CommandItem>
+                                  ))}
+                                </ScrollArea>
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <FormDescription>
+                        {repository ? `Default: ${repository.fullName}` : "Select a repository to clone from"}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="newRepoName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>New Repository Name</FormLabel>
                       <FormControl>
                         <Input
-                          placeholder="my-blog.com"
+                          placeholder="my-new-blog"
                           {...field}
-                          data-testid="input-domain-name"
+                          data-testid="input-new-repo-name"
                         />
                       </FormControl>
                       <FormDescription>
-                        Branch will be named: site-{field.value?.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase() || "..."}
+                        Will be created in your GitHub account
                       </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name="description"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Description (optional)</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="My awesome Astro blog"
+                          rows={2}
+                          {...field}
+                          data-testid="input-repo-description"
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -211,15 +325,15 @@ export default function CloneSite() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={createBranchMutation.isPending}
-                  data-testid="button-create-site"
+                  disabled={cloneMutation.isPending || !selectedSource}
+                  data-testid="button-clone-repo"
                 >
-                  {createBranchMutation.isPending ? (
+                  {cloneMutation.isPending ? (
                     <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
-                    <GitBranch className="w-4 h-4 mr-2" />
+                    <Plus className="w-4 h-4 mr-2" />
                   )}
-                  Create Site Branch
+                  Create Repository
                 </Button>
               </form>
             </Form>
@@ -229,115 +343,63 @@ export default function CloneSite() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <ArrowRightLeft className="w-5 h-5" />
-              Current Branch
+              <Github className="w-5 h-5" />
+              What Gets Cloned
             </CardTitle>
             <CardDescription>
-              Switch between template and site branches
+              The new repository will contain all files from the source
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="p-3 rounded-lg bg-muted">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <GitBranch className="w-4 h-4 text-primary" />
-                  <span className="font-medium">{repository.activeBranch}</span>
+            {selectedSource ? (
+              <div className="p-4 rounded-lg bg-muted">
+                <div className="flex items-center gap-3">
+                  <Github className="w-5 h-5 text-muted-foreground" />
+                  <div>
+                    <p className="font-medium" data-testid="text-source-repo">{selectedSource}</p>
+                    <p className="text-sm text-muted-foreground">Source template</p>
+                  </div>
                 </div>
-                {repository.activeBranch === repository.defaultBranch ? (
-                  <Badge>Template</Badge>
-                ) : (
-                  <Badge variant="secondary">Site</Badge>
-                )}
               </div>
+            ) : (
+              <div className="p-4 rounded-lg border border-dashed border-border text-center">
+                <Github className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground">
+                  Select a source repository to clone
+                </p>
+              </div>
+            )}
+
+            <div className="space-y-2 text-sm">
+              <h4 className="font-medium">Includes:</h4>
+              <ul className="space-y-1 text-muted-foreground">
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500" />
+                  All files and folder structure
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500" />
+                  Blog posts and content
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500" />
+                  Theme and configuration
+                </li>
+                <li className="flex items-center gap-2">
+                  <CheckCircle className="w-3 h-3 text-green-500" />
+                  Astro setup and dependencies
+                </li>
+              </ul>
             </div>
 
-            {branches.length > 1 && (
-              <Select
-                value={repository.activeBranch}
-                onValueChange={(value) => switchBranchMutation.mutate(value)}
-                disabled={switchBranchMutation.isPending}
-              >
-                <SelectTrigger data-testid="select-branch">
-                  <SelectValue placeholder="Switch branch..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((branch) => (
-                    <SelectItem key={branch.name} value={branch.name}>
-                      <div className="flex items-center gap-2">
-                        {branch.isTemplate ? (
-                          <GitBranch className="w-3 h-3" />
-                        ) : (
-                          <Globe className="w-3 h-3" />
-                        )}
-                        {branch.name}
-                        {branch.isTemplate && " (template)"}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
+            <div className="pt-2">
+              <Badge variant="outline" className="text-xs">
+                Tip: After cloning, connect to the new repo and customize it
+              </Badge>
+            </div>
           </CardContent>
         </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Globe className="w-5 h-5" />
-            Site Branches
-          </CardTitle>
-          <CardDescription>
-            All site branches created from the template ({repository.defaultBranch})
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {branchesLoading ? (
-            <div className="space-y-3">
-              <Skeleton className="h-12 w-full" />
-              <Skeleton className="h-12 w-full" />
-            </div>
-          ) : siteBranches.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
-              <Globe className="w-12 h-12 mx-auto mb-4 opacity-50" />
-              <p>No site branches yet</p>
-              <p className="text-sm">Create your first site using the form above</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {siteBranches.map((branch) => (
-                <div
-                  key={branch.name}
-                  className={`p-3 rounded-lg border flex items-center justify-between hover-elevate cursor-pointer ${
-                    repository.activeBranch === branch.name 
-                      ? "border-primary bg-primary/5" 
-                      : "border-border"
-                  }`}
-                  onClick={() => {
-                    if (repository.activeBranch !== branch.name) {
-                      switchBranchMutation.mutate(branch.name);
-                    }
-                  }}
-                  data-testid={`branch-item-${branch.name}`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Globe className="w-4 h-4 text-muted-foreground" />
-                    <div>
-                      <p className="font-medium">{branch.name}</p>
-                      {branch.domain && (
-                        <p className="text-sm text-muted-foreground">{branch.domain}</p>
-                      )}
-                    </div>
-                  </div>
-                  {repository.activeBranch === branch.name && (
-                    <Badge variant="default">Active</Badge>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
     </div>
   );
 }
