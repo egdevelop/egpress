@@ -53,7 +53,7 @@ import type { Repository, GitHubRepo } from "@shared/schema";
 
 interface GitHubStatus {
   connected: boolean;
-  source: "manual" | "replit" | "env" | null;
+  source: "manual" | "env" | null;
   username?: string;
 }
 
@@ -208,8 +208,7 @@ export default function Settings() {
   const getSourceLabel = (source: string | null) => {
     switch (source) {
       case "manual": return "Personal Access Token";
-      case "env": return "Environment Variable";
-      case "replit": return "Replit Integration";
+      case "env": return "Environment Variable (GITHUB_TOKEN)";
       default: return "Not Connected";
     }
   };

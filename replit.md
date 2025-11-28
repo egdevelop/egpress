@@ -187,13 +187,69 @@ The application runs on port 5000 with:
 
 ### GitHub Authentication Options
 
-The CMS supports multiple GitHub authentication methods (in priority order):
+The CMS supports two GitHub authentication methods (in priority order):
 
-1. **Environment Variable** - Set `GITHUB_TOKEN` in your environment for persistent authentication
+1. **Environment Variable** - Set `GITHUB_TOKEN` in your environment for persistent authentication (recommended for self-hosting)
 2. **Manual Token** - Enter a Personal Access Token in Settings (stored in memory, resets on restart)
-3. **Replit Integration** - Uses Replit's GitHub connector if available
 
 For self-hosting, create a GitHub Personal Access Token at https://github.com/settings/tokens/new with `repo` scope.
+
+## Self-Hosting Guide
+
+This CMS is designed to be self-hosted on any server. Here's how to deploy:
+
+### Prerequisites
+- Node.js 18+ 
+- npm or yarn
+
+### Environment Variables
+Set these environment variables for your deployment:
+
+```bash
+# Required for GitHub integration (create at github.com/settings/tokens/new with 'repo' scope)
+GITHUB_TOKEN=ghp_your_token_here
+
+# Required for session security (generate a random string)
+SESSION_SECRET=your_random_secret_here
+
+# Optional: Port (defaults to 5000)
+PORT=5000
+```
+
+### Build & Run
+
+```bash
+# Install dependencies
+npm install
+
+# Build for production
+npm run build
+
+# Start production server
+npm start
+```
+
+### Docker Deployment (Optional)
+
+```dockerfile
+FROM node:20-alpine
+WORKDIR /app
+COPY package*.json ./
+RUN npm ci --only=production
+COPY . .
+RUN npm run build
+EXPOSE 5000
+ENV NODE_ENV=production
+CMD ["npm", "start"]
+```
+
+### Features Configuration
+
+All features work without external dependencies:
+- **GitHub Integration**: Uses GITHUB_TOKEN env var or manual token via Settings
+- **Vercel Deployment**: Configure via Vercel API token in the app
+- **Google Search Console**: Configure credentials directly in the app
+- **AI Post Generation**: Requires Gemini API key (configured in app)
 
 ## User Preferences
 
