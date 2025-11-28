@@ -128,7 +128,7 @@ function parsePost(path: string, content: string): Post | null {
       title: data.title || "Untitled",
       description: data.description || "",
       pubDate: data.pubDate ? new Date(data.pubDate).toISOString() : new Date().toISOString(),
-      heroImage: data.heroImage || "",
+      heroImage: data.featuredImage || data.heroImage || "",
       author: data.author || undefined,
       category: data.category || "",
       tags: Array.isArray(data.tags) ? data.tags : [],
@@ -158,10 +158,12 @@ function generatePostContent(post: Omit<Post, "path">, originalFrontmatter?: Rec
     delete frontmatter.description;
   }
   
-  // Handle heroImage - remove if empty
+  // Handle featuredImage (mapped from heroImage form field) - remove if empty
   if (post.heroImage && post.heroImage.trim()) {
-    frontmatter.heroImage = post.heroImage;
+    frontmatter.featuredImage = post.heroImage;
+    delete frontmatter.heroImage; // Remove old heroImage if exists
   } else {
+    delete frontmatter.featuredImage;
     delete frontmatter.heroImage;
   }
   
