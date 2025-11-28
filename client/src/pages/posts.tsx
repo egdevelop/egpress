@@ -136,7 +136,7 @@ function PostCard({
               </div>
               {post.author && (
                 <div className="flex items-center gap-1">
-                  <span>by {post.author}</span>
+                  <span>by {typeof post.author === 'string' ? post.author : post.author.name}</span>
                 </div>
               )}
               {post.tags && post.tags.length > 0 && (

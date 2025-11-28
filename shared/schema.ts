@@ -16,6 +16,17 @@ export type Repository = z.infer<typeof repositorySchema>;
 export const insertRepositorySchema = repositorySchema.omit({ id: true });
 export type InsertRepository = z.infer<typeof insertRepositorySchema>;
 
+// Author schema (can be string or object)
+export const authorSchema = z.union([
+  z.string(),
+  z.object({
+    name: z.string(),
+    avatar: z.string().optional(),
+  }),
+]);
+
+export type Author = z.infer<typeof authorSchema>;
+
 // Blog post schema (based on Astro blog template)
 export const postSchema = z.object({
   path: z.string(),
@@ -24,7 +35,7 @@ export const postSchema = z.object({
   description: z.string().optional(),
   pubDate: z.string(),
   heroImage: z.string().optional(),
-  author: z.string().optional(),
+  author: authorSchema.optional(),
   tags: z.array(z.string()).optional(),
   draft: z.boolean().optional(),
   content: z.string(),
@@ -51,15 +62,21 @@ export const themeSettingsSchema = z.object({
 
 export type ThemeSettings = z.infer<typeof themeSettingsSchema>;
 
+// File tree item type (defined first to avoid circular reference issues)
+export interface FileTreeItem {
+  name: string;
+  path: string;
+  type: "file" | "dir";
+  children?: FileTreeItem[];
+}
+
 // File tree item schema
-export const fileTreeItemSchema = z.object({
+export const fileTreeItemSchema: z.ZodType<FileTreeItem> = z.object({
   name: z.string(),
   path: z.string(),
   type: z.enum(["file", "dir"]),
-  children: z.array(z.lazy(() => fileTreeItemSchema)).optional(),
+  children: z.lazy(() => z.array(fileTreeItemSchema)).optional(),
 });
-
-export type FileTreeItem = z.infer<typeof fileTreeItemSchema>;
 
 // GitHub commit schema
 export const commitSchema = z.object({

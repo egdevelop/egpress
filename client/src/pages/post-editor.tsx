@@ -173,13 +173,16 @@ export default function PostEditor() {
   useEffect(() => {
     if (postData?.data) {
       const post = postData.data;
+      const authorName = post.author 
+        ? (typeof post.author === 'string' ? post.author : post.author.name) 
+        : "";
       form.reset({
         title: post.title,
         slug: post.slug,
         description: post.description || "",
         pubDate: post.pubDate.split("T")[0],
         heroImage: post.heroImage || "",
-        author: post.author || "",
+        author: authorName,
         tags: post.tags || [],
         draft: post.draft ?? false,
         content: post.content,
