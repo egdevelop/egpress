@@ -20,6 +20,7 @@ import PagesEditor from "@/pages/pages-editor";
 import CloneSite from "@/pages/clone-site";
 import AIGenerator from "@/pages/ai-generator";
 import SearchConsole from "@/pages/search-console";
+import VercelPage from "@/pages/vercel";
 
 function Router() {
   return (
@@ -34,6 +35,7 @@ function Router() {
       <Route path="/adsense" component={Adsense} />
       <Route path="/ai" component={AIGenerator} />
       <Route path="/search-console" component={SearchConsole} />
+      <Route path="/vercel" component={VercelPage} />
       <Route path="/clone" component={CloneSite} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />

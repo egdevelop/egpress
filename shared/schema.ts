@@ -212,3 +212,70 @@ export const githubRepoSchema = z.object({
 });
 
 export type GitHubRepo = z.infer<typeof githubRepoSchema>;
+
+// Vercel configuration schema
+export const vercelConfigSchema = z.object({
+  token: z.string(),
+  teamId: z.string().optional(),
+  username: z.string().optional(),
+});
+
+export type VercelConfig = z.infer<typeof vercelConfigSchema>;
+
+// Vercel project schema
+export const vercelProjectSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  framework: z.string().optional(),
+  productionUrl: z.string().optional(),
+  createdAt: z.string().optional(),
+  gitRepository: z.object({
+    type: z.string(),
+    repo: z.string(),
+  }).optional(),
+});
+
+export type VercelProject = z.infer<typeof vercelProjectSchema>;
+
+// Vercel deployment schema
+export const vercelDeploymentSchema = z.object({
+  id: z.string(),
+  url: z.string(),
+  state: z.enum(["BUILDING", "ERROR", "INITIALIZING", "QUEUED", "READY", "CANCELED"]),
+  createdAt: z.number(),
+  buildingAt: z.number().optional(),
+  readyAt: z.number().optional(),
+  target: z.string().optional(),
+  source: z.string().optional(),
+  meta: z.object({
+    githubCommitRef: z.string().optional(),
+    githubCommitMessage: z.string().optional(),
+  }).optional(),
+});
+
+export type VercelDeployment = z.infer<typeof vercelDeploymentSchema>;
+
+// Vercel domain schema
+export const vercelDomainSchema = z.object({
+  name: z.string(),
+  verified: z.boolean(),
+  configured: z.boolean().optional(),
+  createdAt: z.number().optional(),
+});
+
+export type VercelDomain = z.infer<typeof vercelDomainSchema>;
+
+// Vercel credentials form schema (for frontend)
+export const vercelCredentialsSchema = z.object({
+  token: z.string().min(1, "Vercel token is required"),
+  teamId: z.string().optional(),
+});
+
+export type VercelCredentials = z.infer<typeof vercelCredentialsSchema>;
+
+// Vercel add domain schema
+export const vercelAddDomainSchema = z.object({
+  domain: z.string().min(1, "Domain is required"),
+});
+
+export type VercelAddDomain = z.infer<typeof vercelAddDomainSchema>;

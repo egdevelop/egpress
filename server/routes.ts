@@ -1491,6 +1491,324 @@ export async function registerRoutes(
     }
   });
 
+  // ============== VERCEL INTEGRATION ==============
+
+  // Get Vercel configuration status
+  app.get("/api/vercel/config", async (_req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      const project = await storage.getVercelProject();
+      res.json({
+        success: true,
+        data: {
+          hasToken: !!config?.token,
+          username: config?.username,
+          teamId: config?.teamId,
+          project: project,
+        },
+      });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Save Vercel token
+  app.post("/api/vercel/token", async (req, res) => {
+    try {
+      const { token, teamId } = req.body;
+      if (!token) {
+        return res.json({ success: false, error: "Token is required" });
+      }
+
+      // Validate token by fetching user info
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(token, teamId);
+      
+      try {
+        const user = await vercel.validateToken();
+        await storage.setVercelConfig({
+          token,
+          teamId,
+          username: user.username,
+        });
+        res.json({
+          success: true,
+          data: { username: user.username, email: user.email },
+        });
+      } catch (validationError: any) {
+        res.json({ success: false, error: "Invalid Vercel token: " + validationError.message });
+      }
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Clear Vercel token
+  app.delete("/api/vercel/token", async (_req, res) => {
+    try {
+      await storage.setVercelConfig(null);
+      await storage.setVercelProject(null);
+      await storage.setVercelDeployments([]);
+      await storage.setVercelDomains([]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // List Vercel projects
+  app.get("/api/vercel/projects", async (_req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      if (!config?.token) {
+        return res.json({ success: false, error: "Vercel not connected" });
+      }
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      const projects = await vercel.listProjects();
+      res.json({ success: true, data: projects });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Link or create Vercel project for current repository
+  app.post("/api/vercel/project/link", async (req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      if (!config?.token) {
+        return res.json({ success: false, error: "Vercel not connected" });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const { projectId, createNew, projectName } = req.body;
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+
+      let project;
+      if (createNew) {
+        const name = projectName || repo.name;
+        project = await vercel.createProject(name, {
+          owner: repo.owner,
+          repo: repo.name,
+        });
+      } else if (projectId) {
+        project = await vercel.getProject(projectId);
+        if (!project) {
+          return res.json({ success: false, error: "Project not found" });
+        }
+      } else {
+        return res.json({ success: false, error: "Either projectId or createNew is required" });
+      }
+
+      await storage.setVercelProject(project);
+      
+      // Fetch initial deployments and domains
+      const deployments = await vercel.getDeployments(project.id);
+      await storage.setVercelDeployments(deployments);
+      
+      const domains = await vercel.getDomains(project.id);
+      await storage.setVercelDomains(domains);
+
+      res.json({ success: true, data: project });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Unlink Vercel project
+  app.post("/api/vercel/project/unlink", async (_req, res) => {
+    try {
+      await storage.setVercelProject(null);
+      await storage.setVercelDeployments([]);
+      await storage.setVercelDomains([]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Get deployments
+  app.get("/api/vercel/deployments", async (_req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      const project = await storage.getVercelProject();
+      
+      if (!config?.token || !project) {
+        const cached = await storage.getVercelDeployments();
+        return res.json({ success: true, data: cached });
+      }
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      const deployments = await vercel.getDeployments(project.id);
+      await storage.setVercelDeployments(deployments);
+      
+      res.json({ success: true, data: deployments });
+    } catch (error: any) {
+      const cached = await storage.getVercelDeployments();
+      res.json({ success: true, data: cached, warning: error.message });
+    }
+  });
+
+  // Trigger new deployment
+  app.post("/api/vercel/deployments", async (_req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      const project = await storage.getVercelProject();
+      const repo = await storage.getRepository();
+      
+      if (!config?.token) {
+        return res.json({ success: false, error: "Vercel not connected" });
+      }
+      if (!project) {
+        return res.json({ success: false, error: "No Vercel project linked" });
+      }
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      
+      const deployment = await vercel.triggerDeployment(project.name, {
+        owner: repo.owner,
+        repo: repo.name,
+        branch: repo.activeBranch,
+      });
+      
+      // Refresh deployments list
+      const deployments = await vercel.getDeployments(project.id);
+      await storage.setVercelDeployments(deployments);
+      
+      res.json({ success: true, data: deployment });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Get domains
+  app.get("/api/vercel/domains", async (_req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      const project = await storage.getVercelProject();
+      
+      if (!config?.token || !project) {
+        const cached = await storage.getVercelDomains();
+        return res.json({ success: true, data: cached });
+      }
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      const domains = await vercel.getDomains(project.id);
+      await storage.setVercelDomains(domains);
+      
+      res.json({ success: true, data: domains });
+    } catch (error: any) {
+      const cached = await storage.getVercelDomains();
+      res.json({ success: true, data: cached, warning: error.message });
+    }
+  });
+
+  // Add domain
+  app.post("/api/vercel/domains", async (req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      const project = await storage.getVercelProject();
+      
+      if (!config?.token) {
+        return res.json({ success: false, error: "Vercel not connected" });
+      }
+      if (!project) {
+        return res.json({ success: false, error: "No Vercel project linked" });
+      }
+
+      const { domain } = req.body;
+      if (!domain || typeof domain !== "string") {
+        return res.json({ success: false, error: "Domain is required" });
+      }
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      
+      const newDomain = await vercel.addDomain(project.id, domain.toLowerCase().trim());
+      
+      // Refresh domains list
+      const domains = await vercel.getDomains(project.id);
+      await storage.setVercelDomains(domains);
+      
+      res.json({ success: true, data: newDomain });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Remove domain
+  app.delete("/api/vercel/domains/:domain", async (req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      const project = await storage.getVercelProject();
+      
+      if (!config?.token) {
+        return res.json({ success: false, error: "Vercel not connected" });
+      }
+      if (!project) {
+        return res.json({ success: false, error: "No Vercel project linked" });
+      }
+
+      const { domain } = req.params;
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      
+      await vercel.removeDomain(project.id, domain);
+      
+      // Refresh domains list
+      const domains = await vercel.getDomains(project.id);
+      await storage.setVercelDomains(domains);
+      
+      res.json({ success: true });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Verify domain
+  app.post("/api/vercel/domains/:domain/verify", async (req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      const project = await storage.getVercelProject();
+      
+      if (!config?.token) {
+        return res.json({ success: false, error: "Vercel not connected" });
+      }
+      if (!project) {
+        return res.json({ success: false, error: "No Vercel project linked" });
+      }
+
+      const { domain } = req.params;
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      
+      const verifiedDomain = await vercel.verifyDomain(project.id, domain);
+      
+      // Refresh domains list
+      const domains = await vercel.getDomains(project.id);
+      await storage.setVercelDomains(domains);
+      
+      res.json({ success: true, data: verifiedDomain });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
   return httpServer;
 }
 

@@ -14,6 +14,7 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 - **Static Pages Editor**: Edit non-blog pages like About, Contact, Privacy
 - **AI Post Generator**: Generate blog posts using Google Gemini AI
 - **Google Search Console**: Submit URLs for indexing and track status
+- **Vercel Integration**: Deploy to Vercel, manage domains, and view deployment status
 - **Site Cloner**: Clone repositories to create new blog sites
 - **File Browser**: Navigate and edit repository files
 - **Markdown Editor**: Monaco-based editor with syntax highlighting and preview
@@ -44,6 +45,7 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 │   │   │   ├── pages-editor.tsx   # Static pages editor
 │   │   │   ├── ai-generator.tsx   # AI post generation
 │   │   │   ├── search-console.tsx # Google Search Console integration
+│   │   │   ├── vercel.tsx         # Vercel deployment integration
 │   │   │   ├── clone-site.tsx     # Clone to new repo
 │   │   │   └── settings.tsx       # App settings
 │   │   ├── App.tsx         # Main app with routing
@@ -51,6 +53,7 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 ├── server/                 # Backend Express server
 │   ├── github.ts           # GitHub API integration
 │   ├── gemini.ts           # Google Gemini AI integration
+│   ├── vercel.ts           # Vercel API integration
 │   ├── routes.ts           # API endpoints
 │   ├── storage.ts          # In-memory data storage
 │   └── index.ts            # Server entry point
@@ -154,6 +157,20 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 - `DELETE /api/search-console/credentials` - Clear credentials
 - `GET /api/search-console/status` - Get URL indexing status
 - `POST /api/search-console/submit` - Submit URLs for indexing
+
+### Vercel
+- `GET /api/vercel/config` - Get Vercel configuration status
+- `POST /api/vercel/token` - Save Vercel API token
+- `DELETE /api/vercel/token` - Clear Vercel token
+- `GET /api/vercel/projects` - List Vercel projects
+- `POST /api/vercel/project/link` - Link or create Vercel project
+- `POST /api/vercel/project/unlink` - Unlink Vercel project
+- `GET /api/vercel/deployments` - Get deployments list
+- `POST /api/vercel/deployments` - Trigger new deployment
+- `GET /api/vercel/domains` - Get project domains
+- `POST /api/vercel/domains` - Add domain
+- `DELETE /api/vercel/domains/:domain` - Remove domain
+- `POST /api/vercel/domains/:domain/verify` - Verify domain
 
 ## Design System
 

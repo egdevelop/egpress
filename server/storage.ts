@@ -1,4 +1,4 @@
-import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo, VercelConfig, VercelProject, VercelDeployment, VercelDomain } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface SearchConsoleConfig {
@@ -60,6 +60,16 @@ export interface IStorage {
   getIndexingStatus(): Promise<IndexingStatus[]>;
   setIndexingStatus(status: IndexingStatus[]): Promise<void>;
   updateIndexingStatus(url: string, status: Partial<IndexingStatus>): Promise<void>;
+
+  // Vercel
+  getVercelConfig(): Promise<VercelConfig | null>;
+  setVercelConfig(config: VercelConfig | null): Promise<void>;
+  getVercelProject(): Promise<VercelProject | null>;
+  setVercelProject(project: VercelProject | null): Promise<void>;
+  getVercelDeployments(): Promise<VercelDeployment[]>;
+  setVercelDeployments(deployments: VercelDeployment[]): Promise<void>;
+  getVercelDomains(): Promise<VercelDomain[]>;
+  setVercelDomains(domains: VercelDomain[]): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -74,6 +84,10 @@ export class MemStorage implements IStorage {
   private staticPages: StaticPage[] = [];
   private searchConsoleConfig: SearchConsoleConfig | null = null;
   private indexingStatus: IndexingStatus[] = [];
+  private vercelConfig: VercelConfig | null = null;
+  private vercelProject: VercelProject | null = null;
+  private vercelDeployments: VercelDeployment[] = [];
+  private vercelDomains: VercelDomain[] = [];
 
   async getRepository(): Promise<Repository | null> {
     return this.repository;
@@ -95,6 +109,10 @@ export class MemStorage implements IStorage {
     this.staticPages = [];
     this.searchConsoleConfig = null;
     this.indexingStatus = [];
+    this.vercelConfig = null;
+    this.vercelProject = null;
+    this.vercelDeployments = [];
+    this.vercelDomains = [];
   }
   
   async setActiveBranch(branch: string): Promise<void> {
@@ -213,6 +231,38 @@ export class MemStorage implements IStorage {
         ...updates,
       } as IndexingStatus);
     }
+  }
+
+  async getVercelConfig(): Promise<VercelConfig | null> {
+    return this.vercelConfig;
+  }
+
+  async setVercelConfig(config: VercelConfig | null): Promise<void> {
+    this.vercelConfig = config;
+  }
+
+  async getVercelProject(): Promise<VercelProject | null> {
+    return this.vercelProject;
+  }
+
+  async setVercelProject(project: VercelProject | null): Promise<void> {
+    this.vercelProject = project;
+  }
+
+  async getVercelDeployments(): Promise<VercelDeployment[]> {
+    return this.vercelDeployments;
+  }
+
+  async setVercelDeployments(deployments: VercelDeployment[]): Promise<void> {
+    this.vercelDeployments = deployments;
+  }
+
+  async getVercelDomains(): Promise<VercelDomain[]> {
+    return this.vercelDomains;
+  }
+
+  async setVercelDomains(domains: VercelDomain[]): Promise<void> {
+    this.vercelDomains = domains;
   }
 }
 

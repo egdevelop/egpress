@@ -13,7 +13,8 @@ import {
   FileCode,
   Sparkles,
   Copy,
-  Search
+  Search,
+  Rocket
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -83,6 +84,11 @@ const toolsItems = [
     title: "AI Generator",
     url: "/ai",
     icon: Sparkles,
+  },
+  {
+    title: "Vercel Deploy",
+    url: "/vercel",
+    icon: Rocket,
   },
   {
     title: "Search Console",
