@@ -1,16 +1,660 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
+import { getGitHubClient, getAuthenticatedUser, isGitHubConnected } from "./github";
+import matter from "gray-matter";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent } from "@shared/schema";
+
+// Parse repository URL (owner/repo format)
+function parseRepoUrl(url: string): { owner: string; repo: string } | null {
+  // Handle full GitHub URLs
+  const fullUrlMatch = url.match(/github\.com[\/:]([^\/]+)\/([^\/\.]+)/);
+  if (fullUrlMatch) {
+    return { owner: fullUrlMatch[1], repo: fullUrlMatch[2] };
+  }
+  // Handle owner/repo format
+  const shortMatch = url.match(/^([^\/]+)\/([^\/]+)$/);
+  if (shortMatch) {
+    return { owner: shortMatch[1], repo: shortMatch[2] };
+  }
+  return null;
+}
+
+// Convert GitHub tree to our FileTreeItem format
+function buildFileTree(items: Array<{ path: string; type: string }>): FileTreeItem[] {
+  const root: Map<string, FileTreeItem> = new Map();
+
+  for (const item of items) {
+    const parts = item.path.split("/");
+    let currentPath = "";
+    let parent: FileTreeItem[] | undefined = undefined;
+
+    for (let i = 0; i < parts.length; i++) {
+      const name = parts[i];
+      const isLast = i === parts.length - 1;
+      const fullPath = currentPath ? `${currentPath}/${name}` : name;
+
+      if (i === 0) {
+        if (!root.has(name)) {
+          const newItem: FileTreeItem = {
+            name,
+            path: fullPath,
+            type: isLast ? (item.type === "tree" ? "dir" : "file") : "dir",
+            children: isLast && item.type !== "tree" ? undefined : [],
+          };
+          root.set(name, newItem);
+        }
+        parent = root.get(name)?.children;
+      } else if (parent) {
+        let existing = parent.find(p => p.name === name);
+        if (!existing) {
+          const newItem: FileTreeItem = {
+            name,
+            path: fullPath,
+            type: isLast ? (item.type === "tree" ? "dir" : "file") : "dir",
+            children: isLast && item.type !== "tree" ? undefined : [],
+          };
+          parent.push(newItem);
+          existing = newItem;
+        }
+        parent = existing.children;
+      }
+
+      currentPath = fullPath;
+    }
+  }
+
+  // Sort directories first, then alphabetically
+  const sortTree = (items: FileTreeItem[]): FileTreeItem[] => {
+    return items.sort((a, b) => {
+      if (a.type === "dir" && b.type === "file") return -1;
+      if (a.type === "file" && b.type === "dir") return 1;
+      return a.name.localeCompare(b.name);
+    }).map(item => ({
+      ...item,
+      children: item.children ? sortTree(item.children) : undefined,
+    }));
+  };
+
+  return sortTree(Array.from(root.values()));
+}
+
+// Parse Astro frontmatter post
+function parsePost(path: string, content: string): Post | null {
+  try {
+    const { data, content: markdown } = matter(content);
+    const slug = path.split("/").pop()?.replace(/\.(md|mdx)$/, "") || "";
+    
+    return {
+      path,
+      slug,
+      title: data.title || "Untitled",
+      description: data.description || "",
+      pubDate: data.pubDate ? new Date(data.pubDate).toISOString() : new Date().toISOString(),
+      heroImage: data.heroImage || "",
+      author: data.author || "",
+      tags: Array.isArray(data.tags) ? data.tags : [],
+      draft: data.draft === true,
+      content: markdown,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Generate frontmatter content for a post
+function generatePostContent(post: Omit<Post, "path">): string {
+  const frontmatter: Record<string, any> = {
+    title: post.title,
+    description: post.description || "",
+    pubDate: post.pubDate,
+  };
+
+  if (post.heroImage) frontmatter.heroImage = post.heroImage;
+  if (post.author) frontmatter.author = post.author;
+  if (post.tags && post.tags.length > 0) frontmatter.tags = post.tags;
+  if (post.draft) frontmatter.draft = true;
+
+  const frontmatterStr = Object.entries(frontmatter)
+    .map(([key, value]) => {
+      if (Array.isArray(value)) {
+        return `${key}:\n${value.map(v => `  - "${v}"`).join("\n")}`;
+      }
+      if (typeof value === "string") {
+        return `${key}: "${value}"`;
+      }
+      return `${key}: ${value}`;
+    })
+    .join("\n");
+
+  return `---\n${frontmatterStr}\n---\n\n${post.content}`;
+}
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
-  // put application routes here
-  // prefix all routes with /api
+  
+  // Check GitHub connection status
+  app.get("/api/github/status", async (req, res) => {
+    try {
+      const connected = await isGitHubConnected();
+      res.json({ success: true, data: { connected } });
+    } catch (error) {
+      res.json({ success: false, error: "GitHub not connected" });
+    }
+  });
 
-  // use storage to perform CRUD operations on the storage interface
-  // e.g. storage.insertUser(user) or storage.getUserByUsername(username)
+  // Get authenticated GitHub user
+  app.get("/api/github/user", async (req, res) => {
+    try {
+      const user = await getAuthenticatedUser();
+      res.json({ success: true, data: { 
+        login: user.login, 
+        name: user.name, 
+        avatar_url: user.avatar_url 
+      }});
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get user info" });
+    }
+  });
+
+  // Get connected repository
+  app.get("/api/repository", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      res.json({ success: true, data: repo });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get repository" });
+    }
+  });
+
+  // Connect to a repository
+  app.post("/api/repository/connect", async (req, res) => {
+    try {
+      const { url } = req.body;
+      const parsed = parseRepoUrl(url);
+      
+      if (!parsed) {
+        return res.json({ success: false, error: "Invalid repository URL format. Use owner/repo" });
+      }
+
+      const octokit = await getGitHubClient();
+      
+      // Verify repository access
+      const { data: repoData } = await octokit.repos.get({
+        owner: parsed.owner,
+        repo: parsed.repo,
+      });
+
+      const repository: Repository = {
+        id: repoData.id.toString(),
+        owner: parsed.owner,
+        name: parsed.repo,
+        fullName: repoData.full_name,
+        defaultBranch: repoData.default_branch,
+        connected: true,
+        lastSynced: new Date().toISOString(),
+      };
+
+      await storage.setRepository(repository);
+
+      // Fetch initial data
+      await syncRepositoryData(parsed.owner, parsed.repo, repoData.default_branch);
+
+      res.json({ success: true, data: repository });
+    } catch (error: any) {
+      console.error("Connect error:", error);
+      res.json({ 
+        success: false, 
+        error: error.status === 404 
+          ? "Repository not found or not accessible" 
+          : "Failed to connect to repository" 
+      });
+    }
+  });
+
+  // Disconnect from repository
+  app.post("/api/repository/disconnect", async (req, res) => {
+    try {
+      await storage.clearRepository();
+      res.json({ success: true });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to disconnect" });
+    }
+  });
+
+  // Sync repository data
+  app.post("/api/repository/sync", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      await syncRepositoryData(repo.owner, repo.name, repo.defaultBranch);
+      
+      repo.lastSynced = new Date().toISOString();
+      await storage.setRepository(repo);
+
+      res.json({ success: true });
+    } catch (error) {
+      console.error("Sync error:", error);
+      res.json({ success: false, error: "Failed to sync repository" });
+    }
+  });
+
+  // Get all posts
+  app.get("/api/posts", async (req, res) => {
+    try {
+      const posts = await storage.getPosts();
+      res.json({ success: true, data: posts });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get posts" });
+    }
+  });
+
+  // Get single post
+  app.get("/api/posts/:slug", async (req, res) => {
+    try {
+      const post = await storage.getPost(req.params.slug);
+      if (!post) {
+        return res.json({ success: false, error: "Post not found" });
+      }
+      res.json({ success: true, data: post });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get post" });
+    }
+  });
+
+  // Create new post
+  app.post("/api/posts", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const { slug, title, description, pubDate, heroImage, author, tags, draft, content, commitMessage } = req.body;
+      
+      const path = `src/content/blog/${slug}.md`;
+      const fileContent = generatePostContent({
+        slug, title, description, pubDate, heroImage, author, tags, draft, content
+      });
+
+      const octokit = await getGitHubClient();
+
+      // Create or update file
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path,
+        message: commitMessage || `Create post: ${title}`,
+        content: Buffer.from(fileContent).toString("base64"),
+        branch: repo.defaultBranch,
+      });
+
+      const newPost: Post = {
+        path, slug, title, description: description || "", 
+        pubDate, heroImage: heroImage || "", author: author || "",
+        tags: tags || [], draft: draft || false, content
+      };
+
+      // Update cache
+      const posts = await storage.getPosts();
+      posts.push(newPost);
+      await storage.setPosts(posts);
+
+      res.json({ success: true, data: newPost });
+    } catch (error: any) {
+      console.error("Create post error:", error);
+      res.json({ success: false, error: error.message || "Failed to create post" });
+    }
+  });
+
+  // Update post
+  app.put("/api/posts/:slug", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const existingPost = await storage.getPost(req.params.slug);
+      if (!existingPost) {
+        return res.json({ success: false, error: "Post not found" });
+      }
+
+      const { title, description, pubDate, heroImage, author, tags, draft, content, commitMessage } = req.body;
+      
+      const fileContent = generatePostContent({
+        slug: req.params.slug, title, description, pubDate, heroImage, author, tags, draft, content
+      });
+
+      const octokit = await getGitHubClient();
+
+      // Get current file SHA
+      const { data: currentFile } = await octokit.repos.getContent({
+        owner: repo.owner,
+        repo: repo.name,
+        path: existingPost.path,
+        ref: repo.defaultBranch,
+      });
+
+      const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+
+      // Update file
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path: existingPost.path,
+        message: commitMessage || `Update post: ${title}`,
+        content: Buffer.from(fileContent).toString("base64"),
+        sha,
+        branch: repo.defaultBranch,
+      });
+
+      const updatedPost: Post = {
+        ...existingPost,
+        title, description: description || "", pubDate,
+        heroImage: heroImage || "", author: author || "",
+        tags: tags || [], draft: draft || false, content
+      };
+
+      // Update cache
+      const posts = await storage.getPosts();
+      const postIndex = posts.findIndex(p => p.slug === req.params.slug);
+      if (postIndex >= 0) {
+        posts[postIndex] = updatedPost;
+        await storage.setPosts(posts);
+      }
+
+      res.json({ success: true, data: updatedPost });
+    } catch (error: any) {
+      console.error("Update post error:", error);
+      res.json({ success: false, error: error.message || "Failed to update post" });
+    }
+  });
+
+  // Delete post
+  app.delete("/api/posts/:slug", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const existingPost = await storage.getPost(req.params.slug);
+      if (!existingPost) {
+        return res.json({ success: false, error: "Post not found" });
+      }
+
+      const octokit = await getGitHubClient();
+
+      // Get current file SHA
+      const { data: currentFile } = await octokit.repos.getContent({
+        owner: repo.owner,
+        repo: repo.name,
+        path: existingPost.path,
+        ref: repo.defaultBranch,
+      });
+
+      const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+
+      // Delete file
+      await octokit.repos.deleteFile({
+        owner: repo.owner,
+        repo: repo.name,
+        path: existingPost.path,
+        message: `Delete post: ${existingPost.title}`,
+        sha: sha!,
+        branch: repo.defaultBranch,
+      });
+
+      // Update cache
+      const posts = await storage.getPosts();
+      await storage.setPosts(posts.filter(p => p.slug !== req.params.slug));
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Delete post error:", error);
+      res.json({ success: false, error: error.message || "Failed to delete post" });
+    }
+  });
+
+  // Get file tree
+  app.get("/api/files", async (req, res) => {
+    try {
+      const files = await storage.getFileTree();
+      res.json({ success: true, data: files });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get files" });
+    }
+  });
+
+  // Get file content
+  app.get("/api/files/content", async (req, res) => {
+    try {
+      const { path } = req.query;
+      if (!path || typeof path !== "string") {
+        return res.json({ success: false, error: "Path is required" });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+
+      const { data } = await octokit.repos.getContent({
+        owner: repo.owner,
+        repo: repo.name,
+        path,
+        ref: repo.defaultBranch,
+      });
+
+      if (Array.isArray(data) || !("content" in data)) {
+        return res.json({ success: false, error: "Not a file" });
+      }
+
+      const content = Buffer.from(data.content, "base64").toString("utf-8");
+      await storage.setFileContent(path, content);
+
+      const pageContent: PageContent = {
+        path,
+        content,
+        name: path.split("/").pop() || path,
+      };
+
+      res.json({ success: true, data: pageContent });
+    } catch (error: any) {
+      console.error("Get file content error:", error);
+      res.json({ success: false, error: error.message || "Failed to get file content" });
+    }
+  });
+
+  // Update file content
+  app.put("/api/files/content", async (req, res) => {
+    try {
+      const { path, content, commitMessage } = req.body;
+      
+      if (!path || typeof content !== "string") {
+        return res.json({ success: false, error: "Path and content are required" });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+
+      // Get current file SHA
+      const { data: currentFile } = await octokit.repos.getContent({
+        owner: repo.owner,
+        repo: repo.name,
+        path,
+        ref: repo.defaultBranch,
+      });
+
+      const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+
+      // Update file
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path,
+        message: commitMessage || `Update ${path}`,
+        content: Buffer.from(content).toString("base64"),
+        sha,
+        branch: repo.defaultBranch,
+      });
+
+      await storage.setFileContent(path, content);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Update file content error:", error);
+      res.json({ success: false, error: error.message || "Failed to update file" });
+    }
+  });
+
+  // Get theme settings
+  app.get("/api/theme", async (req, res) => {
+    try {
+      let theme = await storage.getTheme();
+      if (!theme) {
+        theme = {
+          primary: "#FF5D01",
+          secondary: "#0C0C0C",
+          background: "#FAFAFA",
+          text: "#1E293B",
+          accent: "#8B5CF6",
+          success: "#10B981",
+        };
+      }
+      res.json({ success: true, data: theme });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get theme" });
+    }
+  });
+
+  // Update theme settings
+  app.put("/api/theme", async (req, res) => {
+    try {
+      const { theme, commitMessage } = req.body;
+      
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      // Save theme to a config file in the repo
+      const themeContent = JSON.stringify(theme, null, 2);
+      const path = "src/config/theme.json";
+
+      const octokit = await getGitHubClient();
+
+      let sha: string | undefined;
+      try {
+        const { data: currentFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path,
+          ref: repo.defaultBranch,
+        });
+        sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+      } catch {
+        // File doesn't exist yet
+      }
+
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path,
+        message: commitMessage || "Update theme configuration",
+        content: Buffer.from(themeContent).toString("base64"),
+        sha,
+        branch: repo.defaultBranch,
+      });
+
+      await storage.setTheme(theme);
+
+      res.json({ success: true, data: theme });
+    } catch (error: any) {
+      console.error("Update theme error:", error);
+      res.json({ success: false, error: error.message || "Failed to update theme" });
+    }
+  });
 
   return httpServer;
+}
+
+// Helper function to sync repository data
+async function syncRepositoryData(owner: string, repo: string, branch: string) {
+  const octokit = await getGitHubClient();
+
+  // Get file tree
+  const { data: tree } = await octokit.git.getTree({
+    owner,
+    repo,
+    tree_sha: branch,
+    recursive: "true",
+  });
+
+  const fileTree = buildFileTree(
+    tree.tree
+      .filter(item => item.path && item.type)
+      .map(item => ({ path: item.path!, type: item.type! }))
+  );
+  await storage.setFileTree(fileTree);
+
+  // Get blog posts
+  const blogPosts: Post[] = [];
+  const blogFiles = tree.tree.filter(
+    item => item.path?.startsWith("src/content/blog/") && 
+            (item.path.endsWith(".md") || item.path.endsWith(".mdx"))
+  );
+
+  for (const file of blogFiles) {
+    try {
+      const { data } = await octokit.repos.getContent({
+        owner,
+        repo,
+        path: file.path!,
+        ref: branch,
+      });
+
+      if (!Array.isArray(data) && "content" in data) {
+        const content = Buffer.from(data.content, "base64").toString("utf-8");
+        const post = parsePost(file.path!, content);
+        if (post) {
+          blogPosts.push(post);
+        }
+      }
+    } catch (error) {
+      console.error(`Failed to fetch post: ${file.path}`, error);
+    }
+  }
+
+  await storage.setPosts(blogPosts);
+
+  // Try to get theme config
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: "src/config/theme.json",
+      ref: branch,
+    });
+
+    if (!Array.isArray(data) && "content" in data) {
+      const content = Buffer.from(data.content, "base64").toString("utf-8");
+      const theme = JSON.parse(content) as ThemeSettings;
+      await storage.setTheme(theme);
+    }
+  } catch {
+    // Theme config doesn't exist, use defaults
+  }
 }

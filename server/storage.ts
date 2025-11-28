@@ -1,37 +1,90 @@
-import { type User, type InsertUser } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent } from "@shared/schema";
 import { randomUUID } from "crypto";
 
-// modify the interface with any CRUD methods
-// you might need
-
 export interface IStorage {
-  getUser(id: string): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
+  // Repository
+  getRepository(): Promise<Repository | null>;
+  setRepository(repo: Repository): Promise<void>;
+  clearRepository(): Promise<void>;
+
+  // Posts (cached from GitHub)
+  getPosts(): Promise<Post[]>;
+  getPost(slug: string): Promise<Post | undefined>;
+  setPosts(posts: Post[]): Promise<void>;
+
+  // Theme settings (cached from GitHub)
+  getTheme(): Promise<ThemeSettings | null>;
+  setTheme(theme: ThemeSettings): Promise<void>;
+
+  // File tree (cached from GitHub)
+  getFileTree(): Promise<FileTreeItem[]>;
+  setFileTree(files: FileTreeItem[]): Promise<void>;
+
+  // File content (cached from GitHub)
+  getFileContent(path: string): Promise<string | undefined>;
+  setFileContent(path: string, content: string): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
-  private users: Map<string, User>;
+  private repository: Repository | null = null;
+  private posts: Map<string, Post> = new Map();
+  private theme: ThemeSettings | null = null;
+  private fileTree: FileTreeItem[] = [];
+  private fileContents: Map<string, string> = new Map();
 
-  constructor() {
-    this.users = new Map();
+  async getRepository(): Promise<Repository | null> {
+    return this.repository;
   }
 
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
+  async setRepository(repo: Repository): Promise<void> {
+    this.repository = repo;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+  async clearRepository(): Promise<void> {
+    this.repository = null;
+    this.posts.clear();
+    this.theme = null;
+    this.fileTree = [];
+    this.fileContents.clear();
   }
 
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { ...insertUser, id };
-    this.users.set(id, user);
-    return user;
+  async getPosts(): Promise<Post[]> {
+    return Array.from(this.posts.values());
+  }
+
+  async getPost(slug: string): Promise<Post | undefined> {
+    return this.posts.get(slug);
+  }
+
+  async setPosts(posts: Post[]): Promise<void> {
+    this.posts.clear();
+    for (const post of posts) {
+      this.posts.set(post.slug, post);
+    }
+  }
+
+  async getTheme(): Promise<ThemeSettings | null> {
+    return this.theme;
+  }
+
+  async setTheme(theme: ThemeSettings): Promise<void> {
+    this.theme = theme;
+  }
+
+  async getFileTree(): Promise<FileTreeItem[]> {
+    return this.fileTree;
+  }
+
+  async setFileTree(files: FileTreeItem[]): Promise<void> {
+    this.fileTree = files;
+  }
+
+  async getFileContent(path: string): Promise<string | undefined> {
+    return this.fileContents.get(path);
+  }
+
+  async setFileContent(path: string, content: string): Promise<void> {
+    this.fileContents.set(path, content);
   }
 }
 
