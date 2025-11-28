@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { getGitHubClient, getAuthenticatedUser, isGitHubConnected } from "./github";
+import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { generateBlogPost } from "./gemini";
 import matter from "gray-matter";
 import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
@@ -165,8 +165,8 @@ export async function registerRoutes(
   // Check GitHub connection status
   app.get("/api/github/status", async (req, res) => {
     try {
-      const connected = await isGitHubConnected();
-      res.json({ success: true, data: { connected } });
+      const info = await getGitHubConnectionInfo();
+      res.json({ success: true, data: info });
     } catch (error) {
       res.json({ success: false, error: "GitHub not connected" });
     }
@@ -183,6 +183,51 @@ export async function registerRoutes(
       }});
     } catch (error) {
       res.json({ success: false, error: "Failed to get user info" });
+    }
+  });
+
+  // Set manual GitHub token
+  app.post("/api/github/token", async (req, res) => {
+    try {
+      const { token } = req.body;
+      
+      if (!token) {
+        return res.json({ success: false, error: "Token is required" });
+      }
+
+      // Validate the token by trying to get user info
+      const { Octokit } = await import("@octokit/rest");
+      const octokit = new Octokit({ auth: token });
+      
+      try {
+        const { data: user } = await octokit.users.getAuthenticated();
+        
+        // Token is valid, save it
+        setManualGitHubToken(token);
+        
+        res.json({ 
+          success: true, 
+          data: { 
+            login: user.login, 
+            name: user.name,
+            avatar_url: user.avatar_url 
+          } 
+        });
+      } catch (authError: any) {
+        res.json({ success: false, error: "Invalid GitHub token. Please check your Personal Access Token." });
+      }
+    } catch (error: any) {
+      res.json({ success: false, error: error.message || "Failed to set GitHub token" });
+    }
+  });
+
+  // Clear manual GitHub token
+  app.post("/api/github/token/clear", async (req, res) => {
+    try {
+      clearManualToken();
+      res.json({ success: true });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to clear token" });
     }
   });
 
@@ -886,95 +931,60 @@ export async function registerRoutes(
         return res.json({ success: false, error: "New repository name is required" });
       }
 
+      if (!sourceRepo) {
+        return res.json({ success: false, error: "Source repository is required" });
+      }
+
       const octokit = await getGitHubClient();
       const user = await getAuthenticatedUser();
+      const [sourceOwner, sourceRepoName] = sourceRepo.split("/");
 
-      // Create new repository
+      // Create new repository with auto_init to avoid empty repo issues
       const { data: newRepo } = await octokit.repos.createForAuthenticatedUser({
         name: newRepoName,
-        description: description || `Astro blog created from ${sourceRepo || "template"}`,
-        auto_init: false,
+        description: description || `Astro blog created from ${sourceRepo}`,
+        auto_init: true,
         private: false,
       });
 
-      // If source repo provided, copy contents
-      if (sourceRepo) {
-        const [owner, repo] = sourceRepo.split("/");
-        
-        // Get all files from source
-        const { data: tree } = await octokit.git.getTree({
-          owner,
-          repo,
-          tree_sha: "HEAD",
-          recursive: "true",
-        });
+      // Wait a bit for GitHub to initialize the repo
+      await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // Get the base tree from source
-        const { data: baseCommit } = await octokit.git.getRef({
-          owner,
-          repo,
-          ref: "heads/main",
-        });
+      // Get all files from source repo
+      const { data: sourceTree } = await octokit.git.getTree({
+        owner: sourceOwner,
+        repo: sourceRepoName,
+        tree_sha: "HEAD",
+        recursive: "true",
+      });
 
-        const { data: baseTree } = await octokit.git.getTree({
-          owner,
-          repo,
-          tree_sha: baseCommit.object.sha,
-          recursive: "true",
-        });
+      // Copy each file from source to new repo
+      const filesToCopy = sourceTree.tree.filter(item => item.type === "blob" && item.path);
+      
+      for (const item of filesToCopy) {
+        try {
+          // Get file content from source
+          const { data: fileData } = await octokit.repos.getContent({
+            owner: sourceOwner,
+            repo: sourceRepoName,
+            path: item.path!,
+          });
 
-        // Create blobs for each file
-        const newTreeItems: any[] = [];
-        for (const item of baseTree.tree) {
-          if (item.type === "blob" && item.path) {
-            try {
-              const { data: blob } = await octokit.git.getBlob({
-                owner,
-                repo,
-                file_sha: item.sha!,
-              });
-
-              const { data: newBlob } = await octokit.git.createBlob({
-                owner: user.login,
-                repo: newRepoName,
-                content: blob.content,
-                encoding: "base64",
-              });
-
-              newTreeItems.push({
-                path: item.path,
-                mode: item.mode,
-                type: "blob",
-                sha: newBlob.sha,
-              });
-            } catch (e) {
-              console.error(`Failed to copy file: ${item.path}`, e);
-            }
+          if ("content" in fileData && !Array.isArray(fileData)) {
+            // Create/update file in new repo
+            await octokit.repos.createOrUpdateFileContents({
+              owner: user.login,
+              repo: newRepoName,
+              path: item.path!,
+              message: `Copy ${item.path} from ${sourceRepo}`,
+              content: fileData.content.replace(/\n/g, ""), // GitHub API returns content with newlines
+              branch: "main",
+            });
           }
+        } catch (e: any) {
+          // Skip files that fail (e.g., binary files or permission issues)
+          console.log(`Skipped file: ${item.path} - ${e.message}`);
         }
-
-        // Create tree in new repo
-        const { data: newTree } = await octokit.git.createTree({
-          owner: user.login,
-          repo: newRepoName,
-          tree: newTreeItems,
-        });
-
-        // Create initial commit
-        const { data: newCommit } = await octokit.git.createCommit({
-          owner: user.login,
-          repo: newRepoName,
-          message: `Initial commit - cloned from ${sourceRepo}`,
-          tree: newTree.sha,
-        });
-
-        // Update main branch reference
-        await octokit.git.createRef({
-          owner: user.login,
-          repo: newRepoName,
-          ref: "refs/heads/main",
-          sha: newCommit.sha,
-        });
       }
 
       res.json({ 
