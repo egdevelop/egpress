@@ -19,6 +19,7 @@ import Branding from "@/pages/branding";
 import PagesEditor from "@/pages/pages-editor";
 import CloneSite from "@/pages/clone-site";
 import AIGenerator from "@/pages/ai-generator";
+import SearchConsole from "@/pages/search-console";
 
 function Router() {
   return (
@@ -32,6 +33,7 @@ function Router() {
       <Route path="/branding" component={Branding} />
       <Route path="/adsense" component={Adsense} />
       <Route path="/ai" component={AIGenerator} />
+      <Route path="/search-console" component={SearchConsole} />
       <Route path="/clone" component={CloneSite} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />

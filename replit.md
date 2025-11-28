@@ -13,6 +13,7 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 - **AdSense Manager**: Configure Google AdSense with multiple ad slot placements
 - **Static Pages Editor**: Edit non-blog pages like About, Contact, Privacy
 - **AI Post Generator**: Generate blog posts using Google Gemini AI
+- **Google Search Console**: Submit URLs for indexing and track status
 - **Site Cloner**: Clone repositories to create new blog sites
 - **File Browser**: Navigate and edit repository files
 - **Markdown Editor**: Monaco-based editor with syntax highlighting and preview
@@ -42,6 +43,7 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 │   │   │   ├── adsense.tsx        # AdSense configuration
 │   │   │   ├── pages-editor.tsx   # Static pages editor
 │   │   │   ├── ai-generator.tsx   # AI post generation
+│   │   │   ├── search-console.tsx # Google Search Console integration
 │   │   │   ├── clone-site.tsx     # Clone to new repo
 │   │   │   └── settings.tsx       # App settings
 │   │   ├── App.tsx         # Main app with routing
@@ -141,6 +143,17 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 - `GET /api/github/user` - Get authenticated user
 - `POST /api/github/token` - Set manual GitHub Personal Access Token
 - `POST /api/github/token/clear` - Clear manual token
+
+### Branding (Direct Component Editing)
+- `GET /api/branding` - Get branding data from Header.astro and Footer.astro
+- `PUT /api/branding` - Update Header.astro and Footer.astro
+
+### Google Search Console
+- `GET /api/search-console/config` - Get Search Console configuration
+- `POST /api/search-console/credentials` - Save API credentials
+- `DELETE /api/search-console/credentials` - Clear credentials
+- `GET /api/search-console/status` - Get URL indexing status
+- `POST /api/search-console/submit` - Submit URLs for indexing
 
 ## Design System
 

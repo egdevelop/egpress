@@ -1,6 +1,18 @@
 import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
 import { randomUUID } from "crypto";
 
+export interface SearchConsoleConfig {
+  siteUrl: string;
+  serviceAccountJson: string;
+}
+
+export interface IndexingStatus {
+  url: string;
+  status: "pending" | "submitted" | "indexed" | "error";
+  lastSubmitted?: string;
+  message?: string;
+}
+
 export interface IStorage {
   // Repository
   getRepository(): Promise<Repository | null>;
@@ -41,6 +53,13 @@ export interface IStorage {
   // Static pages
   getStaticPages(): Promise<StaticPage[]>;
   setStaticPages(pages: StaticPage[]): Promise<void>;
+
+  // Search Console
+  getSearchConsoleConfig(): Promise<SearchConsoleConfig | null>;
+  setSearchConsoleConfig(config: SearchConsoleConfig | null): Promise<void>;
+  getIndexingStatus(): Promise<IndexingStatus[]>;
+  setIndexingStatus(status: IndexingStatus[]): Promise<void>;
+  updateIndexingStatus(url: string, status: Partial<IndexingStatus>): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -53,6 +72,8 @@ export class MemStorage implements IStorage {
   private siteConfig: SiteConfig | null = null;
   private adsenseConfig: AdsenseConfig | null = null;
   private staticPages: StaticPage[] = [];
+  private searchConsoleConfig: SearchConsoleConfig | null = null;
+  private indexingStatus: IndexingStatus[] = [];
 
   async getRepository(): Promise<Repository | null> {
     return this.repository;
@@ -72,6 +93,8 @@ export class MemStorage implements IStorage {
     this.siteConfig = null;
     this.adsenseConfig = null;
     this.staticPages = [];
+    this.searchConsoleConfig = null;
+    this.indexingStatus = [];
   }
   
   async setActiveBranch(branch: string): Promise<void> {
@@ -161,6 +184,35 @@ export class MemStorage implements IStorage {
 
   async setStaticPages(pages: StaticPage[]): Promise<void> {
     this.staticPages = pages;
+  }
+
+  async getSearchConsoleConfig(): Promise<SearchConsoleConfig | null> {
+    return this.searchConsoleConfig;
+  }
+
+  async setSearchConsoleConfig(config: SearchConsoleConfig | null): Promise<void> {
+    this.searchConsoleConfig = config;
+  }
+
+  async getIndexingStatus(): Promise<IndexingStatus[]> {
+    return this.indexingStatus;
+  }
+
+  async setIndexingStatus(status: IndexingStatus[]): Promise<void> {
+    this.indexingStatus = status;
+  }
+
+  async updateIndexingStatus(url: string, updates: Partial<IndexingStatus>): Promise<void> {
+    const existing = this.indexingStatus.find(s => s.url === url);
+    if (existing) {
+      Object.assign(existing, updates);
+    } else {
+      this.indexingStatus.push({
+        url,
+        status: "pending",
+        ...updates,
+      } as IndexingStatus);
+    }
   }
 }
 

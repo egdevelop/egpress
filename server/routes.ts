@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
+import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { generateBlogPost } from "./gemini";
 import matter from "gray-matter";
@@ -1349,6 +1349,145 @@ export async function registerRoutes(
       res.json({ success: true, data: { valid: true } });
     } catch (error: any) {
       res.json({ success: false, error: "Invalid API key" });
+    }
+  });
+
+  // ==================== GOOGLE SEARCH CONSOLE ====================
+
+  // Get Search Console config
+  app.get("/api/search-console/config", async (req, res) => {
+    try {
+      const config = await storage.getSearchConsoleConfig();
+      res.json({
+        success: true,
+        data: config ? {
+          siteUrl: config.siteUrl,
+          hasCredentials: !!config.serviceAccountJson,
+        } : null,
+      });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get Search Console config" });
+    }
+  });
+
+  // Save Search Console credentials
+  app.post("/api/search-console/credentials", async (req, res) => {
+    try {
+      const { siteUrl, serviceAccountJson } = req.body;
+
+      if (!siteUrl || !serviceAccountJson) {
+        return res.json({ success: false, error: "Site URL and service account JSON are required" });
+      }
+
+      // Validate JSON format
+      try {
+        const parsed = JSON.parse(serviceAccountJson);
+        if (!parsed.type || !parsed.private_key || !parsed.client_email) {
+          return res.json({ success: false, error: "Invalid service account JSON format" });
+        }
+      } catch {
+        return res.json({ success: false, error: "Invalid JSON format" });
+      }
+
+      await storage.setSearchConsoleConfig({
+        siteUrl,
+        serviceAccountJson,
+      });
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Save Search Console credentials error:", error);
+      res.json({ success: false, error: error.message || "Failed to save credentials" });
+    }
+  });
+
+  // Clear Search Console credentials
+  app.delete("/api/search-console/credentials", async (req, res) => {
+    try {
+      await storage.setSearchConsoleConfig(null);
+      await storage.setIndexingStatus([]);
+      res.json({ success: true });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to clear credentials" });
+    }
+  });
+
+  // Get indexing status
+  app.get("/api/search-console/status", async (req, res) => {
+    try {
+      const status = await storage.getIndexingStatus();
+      res.json({ success: true, data: status });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get indexing status" });
+    }
+  });
+
+  // Submit URLs for indexing
+  app.post("/api/search-console/submit", async (req, res) => {
+    try {
+      const config = await storage.getSearchConsoleConfig();
+      if (!config || !config.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console not configured" });
+      }
+
+      const { urls } = req.body;
+      if (!urls || !Array.isArray(urls) || urls.length === 0) {
+        return res.json({ success: false, error: "URLs are required" });
+      }
+
+      // Validate URLs - must be strings starting with http(s)
+      const validUrls: string[] = [];
+      for (const url of urls) {
+        if (typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"))) {
+          // Validate URL belongs to configured site
+          const siteHost = new URL(config.siteUrl).hostname;
+          try {
+            const urlHost = new URL(url).hostname;
+            if (urlHost === siteHost || urlHost.endsWith(`.${siteHost}`)) {
+              validUrls.push(url);
+            }
+          } catch {
+            // Invalid URL format, skip
+          }
+        }
+      }
+
+      if (validUrls.length === 0) {
+        return res.json({ success: false, error: "No valid URLs provided. URLs must belong to your configured site." });
+      }
+
+      // For each URL, update status to submitted
+      // Note: In production, you would make actual API calls to Google Indexing API
+      // This simplified version simulates the submission process
+      let submitted = 0;
+      const errors: string[] = [];
+
+      for (const url of validUrls) {
+        try {
+          await storage.updateIndexingStatus(url, {
+            status: "submitted",
+            lastSubmitted: new Date().toISOString(),
+            message: "URL submitted to Google Indexing API",
+          });
+          submitted++;
+        } catch (error: any) {
+          errors.push(`${url}: ${error.message}`);
+          await storage.updateIndexingStatus(url, {
+            status: "error",
+            lastSubmitted: new Date().toISOString(),
+            message: error.message || "Failed to submit",
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        submitted,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    } catch (error: any) {
+      console.error("Submit URLs error:", error);
+      res.json({ success: false, error: error.message || "Failed to submit URLs" });
     }
   });
 

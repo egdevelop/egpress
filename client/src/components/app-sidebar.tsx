@@ -12,7 +12,8 @@ import {
   Image,
   FileCode,
   Sparkles,
-  Copy
+  Copy,
+  Search
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -82,6 +83,11 @@ const toolsItems = [
     title: "AI Generator",
     url: "/ai",
     icon: Sparkles,
+  },
+  {
+    title: "Search Console",
+    url: "/search-console",
+    icon: Search,
   },
   {
     title: "Clone Site",
