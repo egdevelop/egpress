@@ -286,9 +286,17 @@ export default function ThemeCustomizer() {
       if (data?.success) {
         toast({
           title: "Theme Saved",
-          description: "Your theme changes have been committed to the repository",
+          description: data.cssUpdated 
+            ? `Colors updated in ${data.cssPath} - deploy to see changes`
+            : "Theme saved to config (no CSS variables found to update)",
         });
         queryClient.invalidateQueries({ queryKey: ["/api/theme"] });
+      } else {
+        toast({
+          title: "Save Failed",
+          description: data?.error || "Failed to save theme settings",
+          variant: "destructive",
+        });
       }
     },
     onError: () => {

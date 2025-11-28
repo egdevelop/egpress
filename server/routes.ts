@@ -1095,21 +1095,91 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      // Save theme to a config file in the repo
-      const themeContent = JSON.stringify(theme, null, 2);
-      const path = "src/config/theme.json";
-
       const octokit = await getGitHubClient();
 
-      let sha: string | undefined;
+      // Try to find and update the CSS file with color variables
+      const cssFiles = [
+        "src/styles/global.css",
+        "src/styles/base.css",
+        "src/css/global.css",
+        "src/global.css",
+      ];
+
+      let cssUpdated = false;
+      let cssPath = "";
+      
+      for (const filePath of cssFiles) {
+        try {
+          const { data } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: filePath,
+            ref: repo.activeBranch,
+          });
+
+          if (!Array.isArray(data) && "content" in data) {
+            let cssContent = Buffer.from(data.content, "base64").toString("utf-8");
+            const originalContent = cssContent;
+            
+            // Update CSS custom properties
+            const colorMappings = [
+              { cssVar: "--color-primary", themeKey: "primary" },
+              { cssVar: "--primary", themeKey: "primary" },
+              { cssVar: "--color-secondary", themeKey: "secondary" },
+              { cssVar: "--secondary", themeKey: "secondary" },
+              { cssVar: "--color-background", themeKey: "background" },
+              { cssVar: "--background", themeKey: "background" },
+              { cssVar: "--color-text", themeKey: "text" },
+              { cssVar: "--text", themeKey: "text" },
+              { cssVar: "--color-accent", themeKey: "accent" },
+              { cssVar: "--accent", themeKey: "accent" },
+              { cssVar: "--color-success", themeKey: "success" },
+              { cssVar: "--success", themeKey: "success" },
+            ];
+
+            for (const { cssVar, themeKey } of colorMappings) {
+              const themeValue = (theme as any)[themeKey];
+              if (themeValue) {
+                // Match patterns like: --color-primary: #FF5D01; or --primary: rgb(255,93,1);
+                const regex = new RegExp(`(${cssVar.replace(/-/g, "\\-")}\\s*:\\s*)([^;]+)(;)`, "gi");
+                cssContent = cssContent.replace(regex, `$1${themeValue}$3`);
+              }
+            }
+
+            // Only update if content changed
+            if (cssContent !== originalContent) {
+              await octokit.repos.createOrUpdateFileContents({
+                owner: repo.owner,
+                repo: repo.name,
+                path: filePath,
+                message: commitMessage || "Update theme colors",
+                content: Buffer.from(cssContent).toString("base64"),
+                sha: data.sha,
+                branch: repo.activeBranch,
+              });
+              cssUpdated = true;
+              cssPath = filePath;
+              break;
+            }
+          }
+        } catch {
+          // Try next file
+        }
+      }
+
+      // Also save theme.json for reference
+      const themeContent = JSON.stringify(theme, null, 2);
+      const jsonPath = "src/config/theme.json";
+      
+      let jsonSha: string | undefined;
       try {
         const { data: currentFile } = await octokit.repos.getContent({
           owner: repo.owner,
           repo: repo.name,
-          path,
+          path: jsonPath,
           ref: repo.activeBranch,
         });
-        sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+        jsonSha = Array.isArray(currentFile) ? undefined : currentFile.sha;
       } catch {
         // File doesn't exist yet
       }
@@ -1117,16 +1187,24 @@ export async function registerRoutes(
       await octokit.repos.createOrUpdateFileContents({
         owner: repo.owner,
         repo: repo.name,
-        path,
-        message: commitMessage || "Update theme configuration",
+        path: jsonPath,
+        message: cssUpdated ? "Update theme.json" : (commitMessage || "Update theme configuration"),
         content: Buffer.from(themeContent).toString("base64"),
-        sha,
+        sha: jsonSha,
         branch: repo.activeBranch,
       });
 
       await storage.setTheme(theme);
 
-      res.json({ success: true, data: theme });
+      res.json({ 
+        success: true, 
+        data: theme,
+        cssUpdated,
+        cssPath: cssPath || null,
+        message: cssUpdated 
+          ? `Theme colors updated in ${cssPath}` 
+          : "Theme saved to theme.json (CSS file not found or no matching variables)"
+      });
     } catch (error: any) {
       console.error("Update theme error:", error);
       res.json({ success: false, error: error.message || "Failed to update theme" });
