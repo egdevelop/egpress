@@ -274,6 +274,7 @@ CREATE INDEX idx_user_settings_token_hash ON user_settings(github_token_hash);
 ```
 
 **Notes**: 
+- **Security**: When Supabase is configured, SESSION_SECRET is **required**. The app will refuse to start without it because all API keys and tokens are encrypted using AES-256-GCM with a key derived from SESSION_SECRET.
 - Without Supabase, settings are stored in memory and will be lost on restart.
 - This CMS is designed for single-user self-hosting. If multiple users authenticate with different GitHub tokens simultaneously, settings may conflict. For multi-user deployments, consider running separate instances.
 
