@@ -218,12 +218,19 @@ export class VercelService {
     try {
       const data = await this.request<any>(`/v6/domains/${encodeURIComponent(domain)}/config`);
       console.log(`[Vercel API] getDomainConfig for ${domain}:`, JSON.stringify(data, null, 2));
+      // Map aValues to aRecords - API returns aValues not aRecords
+      const aRecords = (data.aValues || []).map((value: string) => ({
+        value,
+        configuredBy: data.configuredBy,
+        nameType: "A",
+      }));
+      
       return {
         misconfigured: data.misconfigured ?? true,
         configuredBy: data.configuredBy || null,
         recommendedIPv4: data.recommendedIPv4 || [],
         recommendedCNAME: data.recommendedCNAME || [],
-        aRecords: data.aRecords || [],
+        aRecords,
         cnameRecord: data.cnameRecord || null,
       };
     } catch (error) {
