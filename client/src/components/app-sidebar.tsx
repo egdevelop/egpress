@@ -14,7 +14,9 @@ import {
   Sparkles,
   Copy,
   Search,
-  Rocket
+  Rocket,
+  LogOut,
+  User
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -36,6 +38,7 @@ import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth-context";
 import type { Repository } from "@shared/schema";
 
 const contentItems = [
@@ -111,6 +114,8 @@ export function AppSidebar() {
   const [location] = useLocation();
   const [repoUrl, setRepoUrl] = useState("");
   const { toast } = useToast();
+  const { githubUsername, logout } = useAuth();
+  const [, setLocationNav] = useLocation();
 
   const { data: repoData, isLoading: repoLoading } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
@@ -326,12 +331,39 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter className="p-4 border-t border-sidebar-border">
-        {repository?.lastSynced && (
-          <p className="text-xs text-muted-foreground text-center">
-            Last synced: {new Date(repository.lastSynced).toLocaleString()}
-          </p>
-        )}
+      <SidebarFooter className="p-3 border-t border-sidebar-border">
+        <div className="space-y-3">
+          {repository?.lastSynced && (
+            <p className="text-xs text-muted-foreground text-center">
+              Last synced: {new Date(repository.lastSynced).toLocaleString()}
+            </p>
+          )}
+          
+          {githubUsername && (
+            <div className="flex items-center justify-between gap-2 p-2 rounded-md bg-sidebar-accent/30">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <User className="w-4 h-4 text-primary" />
+                </div>
+                <span className="text-sm font-medium truncate" data-testid="text-username">
+                  {githubUsername}
+                </span>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="shrink-0 h-7 w-7"
+                onClick={() => {
+                  logout();
+                  setLocationNav("/login");
+                }}
+                data-testid="button-logout"
+              >
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
+          )}
+        </div>
       </SidebarFooter>
     </Sidebar>
   );

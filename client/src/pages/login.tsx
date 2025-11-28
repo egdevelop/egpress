@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Github, Key, Eye, EyeOff, RefreshCw, ExternalLink, Rocket } from "lucide-react";
+import { Github, Eye, EyeOff, RefreshCw, ExternalLink, Shield, Zap, Database } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 
 export default function Login() {
@@ -34,106 +33,162 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <div className="w-full max-w-md space-y-6">
-        <div className="text-center space-y-2">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
-            <Rocket className="w-8 h-8 text-primary" />
-          </div>
-          <h1 className="text-3xl font-bold" data-testid="text-login-title">EG Press</h1>
-          <p className="text-muted-foreground">
-            Content Management System for your blog
-          </p>
-        </div>
-
-        <Card>
-          <CardHeader className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-[#24292e] flex items-center justify-center">
-                <Github className="w-4 h-4 text-white" />
-              </div>
-              <CardTitle>Connect with GitHub</CardTitle>
+    <div className="min-h-screen flex bg-background">
+      {/* Left side - Branding */}
+      <div className="hidden lg:flex lg:w-1/2 bg-primary/5 flex-col justify-between p-12">
+        <div>
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
+              <span className="text-primary-foreground font-bold text-lg">EG</span>
             </div>
-            <CardDescription>
-              Enter your GitHub Personal Access Token to get started
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="token" className="flex items-center gap-2">
-                  <Key className="w-4 h-4" />
-                  Personal Access Token
-                </Label>
-                <div className="relative">
-                  <Input
-                    id="token"
-                    type={showToken ? "text" : "password"}
-                    placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                    value={token}
-                    onChange={(e) => setToken(e.target.value)}
-                    className="pr-10"
-                    data-testid="input-login-token"
-                  />
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-0 top-0 h-full"
-                    onClick={() => setShowToken(!showToken)}
-                    data-testid="button-toggle-token-visibility"
-                  >
-                    {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </Button>
+            <span className="text-2xl font-bold">EG Press</span>
+          </div>
+        </div>
+        
+        <div className="space-y-8">
+          <div>
+            <h1 className="text-4xl font-bold leading-tight">
+              Manage your blog
+              <br />
+              <span className="text-primary">with ease.</span>
+            </h1>
+            <p className="text-muted-foreground mt-4 text-lg max-w-md">
+              A powerful CMS for managing your blog content with GitHub integration, 
+              AI-powered writing, and seamless deployments.
+            </p>
+          </div>
+          
+          <div className="space-y-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <Github className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium">GitHub Integration</p>
+                <p className="text-sm text-muted-foreground">Direct sync with your repository</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <Zap className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium">AI-Powered</p>
+                <p className="text-sm text-muted-foreground">Generate content with Gemini AI</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                <Database className="w-5 h-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium">Persistent Settings</p>
+                <p className="text-sm text-muted-foreground">Your configs saved securely</p>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        <p className="text-sm text-muted-foreground">
+          Self-hosted Content Management System
+        </p>
+      </div>
+
+      {/* Right side - Login form */}
+      <div className="flex-1 flex items-center justify-center p-6">
+        <div className="w-full max-w-sm space-y-6">
+          {/* Mobile logo */}
+          <div className="lg:hidden text-center mb-8">
+            <div className="inline-flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-primary flex items-center justify-center">
+                <span className="text-primary-foreground font-bold text-lg">EG</span>
+              </div>
+              <span className="text-2xl font-bold">EG Press</span>
+            </div>
+          </div>
+
+          <div className="space-y-2 text-center lg:text-left">
+            <h2 className="text-2xl font-semibold" data-testid="text-login-title">Welcome</h2>
+            <p className="text-muted-foreground">
+              Connect your GitHub account to get started
+            </p>
+          </div>
+
+          <Card className="border-0 shadow-none lg:border lg:shadow-sm">
+            <CardContent className="p-0 lg:p-6">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-2">
+                  <label htmlFor="token" className="text-sm font-medium flex items-center gap-2">
+                    <Shield className="w-4 h-4 text-muted-foreground" />
+                    Personal Access Token
+                  </label>
+                  <div className="relative">
+                    <Input
+                      id="token"
+                      type={showToken ? "text" : "password"}
+                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                      value={token}
+                      onChange={(e) => setToken(e.target.value)}
+                      className="pr-10 h-11"
+                      data-testid="input-login-token"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full"
+                      onClick={() => setShowToken(!showToken)}
+                      data-testid="button-toggle-token-visibility"
+                    >
+                      {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </Button>
+                  </div>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  Create a token at{" "}
+
+                {error && (
+                  <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm" data-testid="text-login-error">
+                    {error}
+                  </div>
+                )}
+
+                <Button
+                  type="submit"
+                  className="w-full h-11"
+                  disabled={isLoading || !token.trim()}
+                  data-testid="button-login"
+                >
+                  {isLoading ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      Connecting...
+                    </>
+                  ) : (
+                    <>
+                      <Github className="w-4 h-4 mr-2" />
+                      Connect to GitHub
+                    </>
+                  )}
+                </Button>
+
+                <div className="pt-2">
                   <a
-                    href="https://github.com/settings/tokens/new"
+                    href="https://github.com/settings/tokens/new?scopes=repo&description=EG%20Press%20CMS"
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-primary hover:underline inline-flex items-center gap-1"
+                    className="text-sm text-primary hover:underline inline-flex items-center gap-1"
                   >
-                    github.com/settings/tokens
+                    Create a new token with repo scope
                     <ExternalLink className="w-3 h-3" />
                   </a>
-                  {" "}with <strong>repo</strong> scope.
-                </p>
-              </div>
-
-              {error && (
-                <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm" data-testid="text-login-error">
-                  {error}
                 </div>
-              )}
+              </form>
+            </CardContent>
+          </Card>
 
-              <Button
-                type="submit"
-                className="w-full"
-                disabled={isLoading || !token.trim()}
-                data-testid="button-login"
-              >
-                {isLoading ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                    Connecting...
-                  </>
-                ) : (
-                  <>
-                    <Github className="w-4 h-4 mr-2" />
-                    Connect to GitHub
-                  </>
-                )}
-              </Button>
-            </form>
-          </CardContent>
-        </Card>
-
-        <p className="text-center text-xs text-muted-foreground">
-          Your token is used to access GitHub repositories and is stored securely.
-          <br />
-          Settings and configurations will be saved to your account.
-        </p>
+          <p className="text-center text-xs text-muted-foreground">
+            Your token is stored in your session and used only to access your repositories.
+          </p>
+        </div>
       </div>
     </div>
   );
