@@ -261,6 +261,19 @@ export class VercelService {
                 status: "configured",
               });
             }
+          } else {
+            // If no A records configured yet, show what to configure
+            const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
+            if (preferredIPv4 && preferredIPv4.value.length > 0) {
+              for (const ip of preferredIPv4.value) {
+                dnsRecords.push({
+                  type: "A",
+                  name: "@",
+                  value: ip,
+                  status: "pending",
+                });
+              }
+            }
           }
           
           const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
@@ -349,6 +362,19 @@ export class VercelService {
             status: "configured",
           });
         }
+      } else {
+        // If no A records configured yet, show what to configure
+        const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
+        if (preferredIPv4 && preferredIPv4.value.length > 0) {
+          for (const ip of preferredIPv4.value) {
+            dnsRecords.push({
+              type: "A",
+              name: "@",
+              value: ip,
+              status: "pending",
+            });
+          }
+        }
       }
       
       const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
@@ -428,6 +454,19 @@ export class VercelService {
             value: aRecord.value,
             status: "configured",
           });
+        }
+      } else {
+        // If no A records configured yet, show what to configure
+        const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
+        if (preferredIPv4 && preferredIPv4.value.length > 0) {
+          for (const ip of preferredIPv4.value) {
+            dnsRecords.push({
+              type: "A",
+              name: "@",
+              value: ip,
+              status: "pending",
+            });
+          }
         }
       }
       
