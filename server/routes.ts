@@ -1,5 +1,6 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
+import crypto from "crypto";
 import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { generateBlogPost } from "./gemini";
@@ -396,7 +397,6 @@ export async function registerRoutes(
     }
 
     // Generate cryptographically secure state for CSRF protection
-    const crypto = require('crypto');
     const state = crypto.randomBytes(32).toString('hex');
     
     // Store state in session for validation on callback
