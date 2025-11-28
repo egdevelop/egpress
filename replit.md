@@ -33,16 +33,22 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 │   │   │   ├── theme-context.tsx
 │   │   │   └── utils.ts
 │   │   ├── pages/          # Page components
-│   │   │   ├── dashboard.tsx
-│   │   │   ├── posts.tsx
-│   │   │   ├── post-editor.tsx
-│   │   │   ├── file-browser.tsx
-│   │   │   ├── theme-customizer.tsx
-│   │   │   └── settings.tsx
+│   │   │   ├── dashboard.tsx      # Overview & stats
+│   │   │   ├── posts.tsx          # Blog posts list
+│   │   │   ├── post-editor.tsx    # Markdown post editor
+│   │   │   ├── file-browser.tsx   # Repository file tree
+│   │   │   ├── theme-customizer.tsx # Color customization
+│   │   │   ├── branding.tsx       # Site config editor
+│   │   │   ├── adsense.tsx        # AdSense configuration
+│   │   │   ├── pages-editor.tsx   # Static pages editor
+│   │   │   ├── ai-generator.tsx   # AI post generation
+│   │   │   ├── clone-site.tsx     # Clone to new repo
+│   │   │   └── settings.tsx       # App settings
 │   │   ├── App.tsx         # Main app with routing
 │   │   └── index.css       # Global styles
 ├── server/                 # Backend Express server
 │   ├── github.ts           # GitHub API integration
+│   ├── gemini.ts           # Google Gemini AI integration
 │   ├── routes.ts           # API endpoints
 │   ├── storage.ts          # In-memory data storage
 │   └── index.ts            # Server entry point
