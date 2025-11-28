@@ -280,21 +280,124 @@ export function AppSidebar() {
 
         {repository ? (
           <div className="space-y-2">
-            <div className="flex items-center gap-2 p-2 rounded-md bg-sidebar-accent/50">
-              <Github className="w-4 h-4 text-muted-foreground" />
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium truncate" data-testid="text-repo-name">
-                  {repository.fullName}
-                </p>
-                <p className="text-xs text-muted-foreground">
-                  {repository.defaultBranch}
-                </p>
-              </div>
-              <Badge variant="outline" className="shrink-0">
-                <Check className="w-3 h-3 mr-1" />
-                <span className="text-xs">Connected</span>
-              </Badge>
-            </div>
+            <Popover open={repoManageOpen} onOpenChange={(open) => {
+              setRepoManageOpen(open);
+              if (!open) setShowChangeRepo(false);
+            }}>
+              <PopoverTrigger asChild>
+                <button
+                  className="flex items-center gap-2 p-2 rounded-md bg-sidebar-accent/50 w-full text-left hover-elevate cursor-pointer"
+                  data-testid="button-repo-manage"
+                >
+                  <Github className="w-4 h-4 text-muted-foreground" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-medium truncate" data-testid="text-repo-name">
+                      {repository.fullName}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {repository.defaultBranch}
+                    </p>
+                  </div>
+                  <Badge variant="outline" className="shrink-0">
+                    <Check className="w-3 h-3 mr-1" />
+                    <span className="text-xs">Connected</span>
+                  </Badge>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[280px] p-0" align="start" side="bottom">
+                {showChangeRepo ? (
+                  <Command>
+                    <CommandInput 
+                      placeholder="Search repositories..." 
+                      value={repoSearch}
+                      onValueChange={setRepoSearch}
+                    />
+                    <CommandList>
+                      <CommandEmpty>
+                        {reposLoading ? (
+                          <div className="flex items-center justify-center py-4">
+                            <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                            Loading...
+                          </div>
+                        ) : (
+                          "No repository found."
+                        )}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        <ScrollArea className="h-48">
+                          {filteredRepos.map((repo) => (
+                            <CommandItem
+                              key={repo.id}
+                              value={repo.fullName}
+                              onSelect={() => handleSelectRepo(repo.fullName)}
+                              className="cursor-pointer"
+                              data-testid={`repo-change-option-${repo.name}`}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                <Github className="w-4 h-4 shrink-0" />
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-sm font-medium truncate">{repo.name}</span>
+                                    {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground truncate">{repo.owner}</p>
+                                </div>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </ScrollArea>
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                ) : (
+                  <div className="p-1">
+                    <button
+                      className="flex items-center gap-2 w-full p-2 text-sm rounded-md hover-elevate"
+                      onClick={() => setShowChangeRepo(true)}
+                      data-testid="button-change-repo"
+                    >
+                      <ArrowRightLeft className="w-4 h-4" />
+                      Change Repository
+                    </button>
+                    <button
+                      className="flex items-center gap-2 w-full p-2 text-sm rounded-md hover-elevate text-destructive"
+                      onClick={() => {
+                        setRepoManageOpen(false);
+                        setDisconnectDialogOpen(true);
+                      }}
+                      data-testid="button-disconnect-repo"
+                    >
+                      <Unplug className="w-4 h-4" />
+                      Disconnect
+                    </button>
+                  </div>
+                )}
+              </PopoverContent>
+            </Popover>
+
+            <AlertDialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Disconnect Repository?</AlertDialogTitle>
+                  <AlertDialogDescription>
+                    This will disconnect <strong>{repository.fullName}</strong> from EG Press. 
+                    Your repository content will not be affected, but you'll need to reconnect to manage it.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel data-testid="button-cancel-disconnect">Cancel</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={() => disconnectMutation.mutate()}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    disabled={disconnectMutation.isPending}
+                    data-testid="button-confirm-disconnect"
+                  >
+                    {disconnectMutation.isPending ? "Disconnecting..." : "Disconnect"}
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+
             <Button
               variant="ghost"
               size="sm"
