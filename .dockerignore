@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build output (will be built in container)
+dist/
+
+# Development files
+.git/
+.gitignore
+.replit
+replit.nix
+.config/
+.cache/
+.upm/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment files (set in Coolify dashboard)
+.env
+.env.local
+.env.*.local
+
+# Documentation
+README.md
+CHANGELOG.md
+docs/
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__/
+coverage/
+
+# Misc
+.DS_Store
+Thumbs.db

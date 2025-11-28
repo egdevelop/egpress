@@ -251,6 +251,16 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
+  // ============== HEALTH CHECK ==============
+  
+  app.get("/api/health", (req, res) => {
+    res.json({ 
+      status: "ok", 
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime()
+    });
+  });
+
   // ============== AUTHENTICATION ROUTES ==============
 
   // Check auth status
