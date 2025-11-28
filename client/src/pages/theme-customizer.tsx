@@ -429,6 +429,55 @@ export default function ThemeCustomizer() {
                   />
                 </CardContent>
               </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-sm">
+                    <Eye className="w-4 h-4" />
+                    CSS Debug
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full"
+                    onClick={async () => {
+                      try {
+                        const response = await fetch("/api/theme/analyze");
+                        const data = await response.json();
+                        if (data.success) {
+                          const found = data.data.filter((f: any) => f.found);
+                          if (found.length > 0) {
+                            const info = found.map((f: any) => 
+                              `${f.file}: ${f.colorVariables?.length || 0} color vars, HSL: ${f.hasHslFormat}`
+                            ).join("\n");
+                            toast({
+                              title: "CSS Analysis",
+                              description: info || "No color variables found",
+                            });
+                            console.log("CSS Analysis:", data.data);
+                          } else {
+                            toast({
+                              title: "No CSS Files Found",
+                              description: "Could not find global.css or similar files",
+                              variant: "destructive",
+                            });
+                          }
+                        }
+                      } catch (err) {
+                        toast({ title: "Error", description: "Failed to analyze CSS", variant: "destructive" });
+                      }
+                    }}
+                    data-testid="button-analyze-css"
+                  >
+                    Analyze CSS Structure
+                  </Button>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Check which CSS files and variables exist in your repo
+                  </p>
+                </CardContent>
+              </Card>
             </div>
           </ScrollArea>
         </ResizablePanel>

@@ -976,6 +976,68 @@ export async function registerRoutes(
     }
   });
 
+  // Analyze CSS structure in repository (for debugging theme issues)
+  app.get("/api/theme/analyze", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+      const results: any[] = [];
+      
+      const cssFiles = [
+        "src/styles/global.css",
+        "src/styles/base.css", 
+        "src/css/global.css",
+        "src/global.css",
+        "src/styles/index.css",
+        "tailwind.config.js",
+        "tailwind.config.ts",
+        "tailwind.config.mjs",
+      ];
+
+      for (const filePath of cssFiles) {
+        try {
+          const { data } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: filePath,
+            ref: repo.activeBranch,
+          });
+
+          if (!Array.isArray(data) && "content" in data) {
+            const content = Buffer.from(data.content, "base64").toString("utf-8");
+            
+            // Find all CSS custom properties
+            const cssVarMatches = content.match(/--[\w-]+:\s*[^;]+;/g) || [];
+            
+            // Find color-related patterns
+            const colorPatterns = content.match(/(--[\w-]*(?:color|primary|secondary|accent|background|foreground|text|success|warning|error|muted|border|card)[\w-]*):\s*([^;]+);/gi) || [];
+            
+            results.push({
+              file: filePath,
+              found: true,
+              size: content.length,
+              hasHslFormat: /--\w+:\s*\d+\s+\d+%\s+\d+%/.test(content),
+              hasHexColors: /#[0-9A-Fa-f]{3,8}/.test(content),
+              cssVariables: cssVarMatches.slice(0, 20), // First 20 vars
+              colorVariables: colorPatterns.slice(0, 20),
+              preview: content.substring(0, 500),
+            });
+          }
+        } catch {
+          results.push({ file: filePath, found: false });
+        }
+      }
+
+      res.json({ success: true, data: results });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
   // Get theme settings - reads from repository's theme.json file
   app.get("/api/theme", async (req, res) => {
     try {
@@ -1085,6 +1147,34 @@ export async function registerRoutes(
     }
   });
 
+  // Helper: Convert hex color to HSL values (H S% L% format for Tailwind)
+  function hexToHsl(hex: string): string {
+    // Remove # if present
+    hex = hex.replace(/^#/, "");
+    
+    // Parse hex values
+    let r = parseInt(hex.substring(0, 2), 16) / 255;
+    let g = parseInt(hex.substring(2, 4), 16) / 255;
+    let b = parseInt(hex.substring(4, 6), 16) / 255;
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h = 0, s = 0, l = (max + min) / 2;
+
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+        case g: h = ((b - r) / d + 2) / 6; break;
+        case b: h = ((r - g) / d + 4) / 6; break;
+      }
+    }
+
+    // Return in Tailwind-compatible format: "H S% L%" (no hsl() wrapper)
+    return `${Math.round(h * 360)} ${Math.round(s * 100)}% ${Math.round(l * 100)}%`;
+  }
+
   // Update theme settings
   app.put("/api/theme", async (req, res) => {
     try {
@@ -1107,6 +1197,7 @@ export async function registerRoutes(
 
       let cssUpdated = false;
       let cssPath = "";
+      let updatedVars: string[] = [];
       
       for (const filePath of cssFiles) {
         try {
@@ -1121,28 +1212,38 @@ export async function registerRoutes(
             let cssContent = Buffer.from(data.content, "base64").toString("utf-8");
             const originalContent = cssContent;
             
+            // Detect if the CSS uses HSL format (Tailwind style: "H S% L%")
+            const usesHslFormat = /--\w+:\s*\d+\s+\d+%\s+\d+%/.test(cssContent);
+            
             // Update CSS custom properties
             const colorMappings = [
-              { cssVar: "--color-primary", themeKey: "primary" },
               { cssVar: "--primary", themeKey: "primary" },
-              { cssVar: "--color-secondary", themeKey: "secondary" },
               { cssVar: "--secondary", themeKey: "secondary" },
-              { cssVar: "--color-background", themeKey: "background" },
               { cssVar: "--background", themeKey: "background" },
-              { cssVar: "--color-text", themeKey: "text" },
-              { cssVar: "--text", themeKey: "text" },
-              { cssVar: "--color-accent", themeKey: "accent" },
+              { cssVar: "--foreground", themeKey: "text" },
               { cssVar: "--accent", themeKey: "accent" },
-              { cssVar: "--color-success", themeKey: "success" },
               { cssVar: "--success", themeKey: "success" },
+              // Also try with color- prefix
+              { cssVar: "--color-primary", themeKey: "primary" },
+              { cssVar: "--color-secondary", themeKey: "secondary" },
+              { cssVar: "--color-background", themeKey: "background" },
+              { cssVar: "--color-text", themeKey: "text" },
+              { cssVar: "--color-accent", themeKey: "accent" },
             ];
 
             for (const { cssVar, themeKey } of colorMappings) {
-              const themeValue = (theme as any)[themeKey];
-              if (themeValue) {
-                // Match patterns like: --color-primary: #FF5D01; or --primary: rgb(255,93,1);
-                const regex = new RegExp(`(${cssVar.replace(/-/g, "\\-")}\\s*:\\s*)([^;]+)(;)`, "gi");
-                cssContent = cssContent.replace(regex, `$1${themeValue}$3`);
+              const hexValue = (theme as any)[themeKey];
+              if (hexValue && hexValue.startsWith("#")) {
+                // Convert to appropriate format
+                const newValue = usesHslFormat ? hexToHsl(hexValue) : hexValue;
+                
+                // Match patterns like: --primary: 24 95% 54%; or --primary: #FF5D01;
+                const regex = new RegExp(`(${cssVar.replace(/-/g, "\\-")}\\s*:\\s*)([^;]+)(;)`, "g");
+                const before = cssContent;
+                cssContent = cssContent.replace(regex, `$1${newValue}$3`);
+                if (cssContent !== before) {
+                  updatedVars.push(cssVar);
+                }
               }
             }
 
@@ -1159,11 +1260,13 @@ export async function registerRoutes(
               });
               cssUpdated = true;
               cssPath = filePath;
+              console.log(`Updated CSS variables in ${filePath}:`, updatedVars);
               break;
             }
           }
-        } catch {
+        } catch (err) {
           // Try next file
+          console.log(`CSS file not found: ${filePath}`);
         }
       }
 
@@ -1201,8 +1304,9 @@ export async function registerRoutes(
         data: theme,
         cssUpdated,
         cssPath: cssPath || null,
+        updatedVars,
         message: cssUpdated 
-          ? `Theme colors updated in ${cssPath}` 
+          ? `Updated ${updatedVars.length} CSS variables in ${cssPath}` 
           : "Theme saved to theme.json (CSS file not found or no matching variables)"
       });
     } catch (error: any) {
