@@ -76,9 +76,15 @@ interface SearchConsoleConfig {
   hasCredentials: boolean;
 }
 
+interface SearchConsoleSite {
+  siteUrl: string;
+  permissionLevel: string;
+}
+
 export default function SearchConsole() {
   const { toast } = useToast();
   const [showCredentialsDialog, setShowCredentialsDialog] = useState(false);
+  const [showSitesDialog, setShowSitesDialog] = useState(false);
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [customUrl, setCustomUrl] = useState("");
 
@@ -93,6 +99,11 @@ export default function SearchConsole() {
 
   const { data: configData, isLoading: configLoading } = useQuery<{ success: boolean; data: SearchConsoleConfig | null }>({
     queryKey: ["/api/search-console/config"],
+  });
+
+  const { data: sitesData, isLoading: sitesLoading, refetch: refetchSites } = useQuery<{ success: boolean; data: SearchConsoleSite[] }>({
+    queryKey: ["/api/search-console/sites"],
+    enabled: !!configData?.data?.hasCredentials,
   });
 
   const { data: statusData, isLoading: statusLoading, refetch: refetchStatus } = useQuery<{ success: boolean; data: IndexingStatus[] }>({
@@ -188,6 +199,30 @@ export default function SearchConsole() {
         });
         queryClient.invalidateQueries({ queryKey: ["/api/search-console/config"] });
         queryClient.invalidateQueries({ queryKey: ["/api/search-console/status"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/search-console/sites"] });
+      }
+    },
+  });
+
+  const selectSiteMutation = useMutation({
+    mutationFn: async (siteUrl: string) => {
+      const response = await apiRequest("POST", "/api/search-console/select-site", { siteUrl });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Site Selected",
+          description: "Site URL has been configured",
+        });
+        setShowSitesDialog(false);
+        queryClient.invalidateQueries({ queryKey: ["/api/search-console/config"] });
+      } else {
+        toast({
+          title: "Selection Failed",
+          description: data.error || "Failed to select site",
+          variant: "destructive",
+        });
       }
     },
   });
@@ -195,6 +230,7 @@ export default function SearchConsole() {
   const repository = repoData?.data;
   const posts = postsData?.data || [];
   const config = configData?.data;
+  const sites = sitesData?.data || [];
   const indexingStatus = statusData?.data || [];
 
   const getPostUrl = (post: Post) => {
@@ -371,21 +407,163 @@ export default function SearchConsole() {
       </div>
 
       {config?.hasCredentials ? (
-        <div className="flex items-center gap-2 p-3 rounded-md bg-green-500/10 border border-green-200">
-          <CheckCircle2 className="w-5 h-5 text-green-600" />
-          <div className="flex-1">
-            <p className="text-sm font-medium text-green-700">API Connected</p>
-            <p className="text-xs text-green-600">{config.siteUrl}</p>
+        <div className="space-y-4">
+          <div className="flex items-center gap-2 p-3 rounded-md bg-green-500/10 border border-green-200">
+            <CheckCircle2 className="w-5 h-5 text-green-600" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-green-700">API Connected</p>
+              {config.siteUrl ? (
+                <p className="text-xs text-green-600">{config.siteUrl}</p>
+              ) : (
+                <p className="text-xs text-amber-600">No site selected - choose a site below</p>
+              )}
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => clearCredentialsMutation.mutate()}
+              className="text-red-600 hover:text-red-700 hover:bg-red-50"
+              data-testid="button-clear-credentials"
+            >
+              <Trash2 className="w-4 h-4" />
+            </Button>
           </div>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => clearCredentialsMutation.mutate()}
-            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-            data-testid="button-clear-credentials"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
+
+          {!config.siteUrl && sites.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Globe className="w-5 h-5" />
+                  Select a Site
+                </CardTitle>
+                <CardDescription>
+                  Choose a verified site from your Google Search Console account
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-2">
+                  {sites.map((site) => (
+                    <Button
+                      key={site.siteUrl}
+                      variant="outline"
+                      className="justify-start h-auto py-3 px-4"
+                      onClick={() => selectSiteMutation.mutate(site.siteUrl)}
+                      disabled={selectSiteMutation.isPending}
+                      data-testid={`button-select-site-${site.siteUrl}`}
+                    >
+                      <div className="flex items-center gap-3 w-full">
+                        <Globe className="w-4 h-4 text-muted-foreground" />
+                        <div className="flex-1 text-left">
+                          <p className="font-medium">{site.siteUrl}</p>
+                          <p className="text-xs text-muted-foreground capitalize">
+                            {site.permissionLevel?.toLowerCase() || "owner"}
+                          </p>
+                        </div>
+                        {selectSiteMutation.isPending && (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        )}
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {!config.siteUrl && sitesLoading && (
+            <Card>
+              <CardContent className="py-8">
+                <div className="flex items-center justify-center gap-2 text-muted-foreground">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span>Loading sites from your Search Console account...</span>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {!config.siteUrl && !sitesLoading && sites.length === 0 && (
+            <Card className="border-amber-200 bg-amber-50/50">
+              <CardContent className="py-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-amber-800">No Sites Found</p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      The service account doesn't have access to any sites. Make sure you've added the service account email as a user in Google Search Console for your verified sites.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => refetchSites()}
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {config.siteUrl && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowSitesDialog(true)}
+                data-testid="button-change-site"
+              >
+                <Globe className="w-4 h-4 mr-2" />
+                Change Site
+              </Button>
+            </div>
+          )}
+
+          <Dialog open={showSitesDialog} onOpenChange={setShowSitesDialog}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Select a Site</DialogTitle>
+                <DialogDescription>
+                  Choose a verified site from your Google Search Console account
+                </DialogDescription>
+              </DialogHeader>
+              <div className="grid gap-2 max-h-[300px] overflow-y-auto">
+                {sitesLoading ? (
+                  <div className="flex items-center justify-center py-8">
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  </div>
+                ) : sites.length > 0 ? (
+                  sites.map((site) => (
+                    <Button
+                      key={site.siteUrl}
+                      variant={site.siteUrl === config.siteUrl ? "secondary" : "outline"}
+                      className="justify-start h-auto py-3 px-4"
+                      onClick={() => selectSiteMutation.mutate(site.siteUrl)}
+                      disabled={selectSiteMutation.isPending}
+                    >
+                      <div className="flex items-center gap-3 w-full">
+                        <Globe className="w-4 h-4 text-muted-foreground" />
+                        <div className="flex-1 text-left">
+                          <p className="font-medium">{site.siteUrl}</p>
+                          <p className="text-xs text-muted-foreground capitalize">
+                            {site.permissionLevel?.toLowerCase() || "owner"}
+                          </p>
+                        </div>
+                        {site.siteUrl === config.siteUrl && (
+                          <Check className="w-4 h-4 text-primary" />
+                        )}
+                      </div>
+                    </Button>
+                  ))
+                ) : (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <p>No sites found in your Search Console account</p>
+                  </div>
+                )}
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       ) : (
         <Card className="border-dashed">
@@ -407,7 +585,7 @@ export default function SearchConsole() {
         </Card>
       )}
 
-      {config?.hasCredentials && (
+      {config?.hasCredentials && config?.siteUrl && (
         <Tabs defaultValue="posts" className="space-y-4">
           <TabsList>
             <TabsTrigger value="posts" data-testid="tab-posts">
