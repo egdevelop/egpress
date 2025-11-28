@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { generateBlogPost } from "./gemini";
 import matter from "gray-matter";
+import yaml from "yaml";
 import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
 import { siteConfigSchema, adsenseConfigSchema } from "@shared/schema";
 
@@ -216,7 +217,6 @@ function generatePostContent(post: Omit<Post, "path">, originalFrontmatter?: Rec
   }
 
   // Use yaml library for proper formatting
-  const yaml = require('yaml');
   const frontmatterStr = yaml.stringify(frontmatter).trim();
 
   return `---\n${frontmatterStr}\n---\n\n${post.content}`;
