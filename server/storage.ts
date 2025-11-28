@@ -1,4 +1,4 @@
-import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -23,6 +23,18 @@ export interface IStorage {
   // File content (cached from GitHub)
   getFileContent(path: string): Promise<string | undefined>;
   setFileContent(path: string, content: string): Promise<void>;
+
+  // Site config (branding)
+  getSiteConfig(): Promise<SiteConfig | null>;
+  setSiteConfig(config: SiteConfig): Promise<void>;
+
+  // AdSense config
+  getAdsenseConfig(): Promise<AdsenseConfig | null>;
+  setAdsenseConfig(config: AdsenseConfig): Promise<void>;
+
+  // Static pages
+  getStaticPages(): Promise<StaticPage[]>;
+  setStaticPages(pages: StaticPage[]): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -31,6 +43,9 @@ export class MemStorage implements IStorage {
   private theme: ThemeSettings | null = null;
   private fileTree: FileTreeItem[] = [];
   private fileContents: Map<string, string> = new Map();
+  private siteConfig: SiteConfig | null = null;
+  private adsenseConfig: AdsenseConfig | null = null;
+  private staticPages: StaticPage[] = [];
 
   async getRepository(): Promise<Repository | null> {
     return this.repository;
@@ -46,6 +61,9 @@ export class MemStorage implements IStorage {
     this.theme = null;
     this.fileTree = [];
     this.fileContents.clear();
+    this.siteConfig = null;
+    this.adsenseConfig = null;
+    this.staticPages = [];
   }
 
   async getPosts(): Promise<Post[]> {
@@ -85,6 +103,30 @@ export class MemStorage implements IStorage {
 
   async setFileContent(path: string, content: string): Promise<void> {
     this.fileContents.set(path, content);
+  }
+
+  async getSiteConfig(): Promise<SiteConfig | null> {
+    return this.siteConfig;
+  }
+
+  async setSiteConfig(config: SiteConfig): Promise<void> {
+    this.siteConfig = config;
+  }
+
+  async getAdsenseConfig(): Promise<AdsenseConfig | null> {
+    return this.adsenseConfig;
+  }
+
+  async setAdsenseConfig(config: AdsenseConfig): Promise<void> {
+    this.adsenseConfig = config;
+  }
+
+  async getStaticPages(): Promise<StaticPage[]> {
+    return this.staticPages;
+  }
+
+  async setStaticPages(pages: StaticPage[]): Promise<void> {
+    this.staticPages = pages;
   }
 }
 

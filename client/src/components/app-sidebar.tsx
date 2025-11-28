@@ -7,7 +7,12 @@ import {
   Github,
   RefreshCw,
   Check,
-  AlertCircle
+  AlertCircle,
+  DollarSign,
+  Image,
+  FileCode,
+  Sparkles,
+  Copy
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -31,7 +36,7 @@ import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Repository } from "@shared/schema";
 
-const navItems = [
+const contentItems = [
   {
     title: "Dashboard",
     url: "/",
@@ -43,14 +48,45 @@ const navItems = [
     icon: FileText,
   },
   {
+    title: "Pages",
+    url: "/pages",
+    icon: FileCode,
+  },
+  {
     title: "File Browser",
     url: "/files",
     icon: FolderTree,
   },
+];
+
+const customizeItems = [
   {
     title: "Theme",
     url: "/theme",
     icon: Palette,
+  },
+  {
+    title: "Branding",
+    url: "/branding",
+    icon: Image,
+  },
+  {
+    title: "AdSense",
+    url: "/adsense",
+    icon: DollarSign,
+  },
+];
+
+const toolsItems = [
+  {
+    title: "AI Generator",
+    url: "/ai",
+    icon: Sparkles,
+  },
+  {
+    title: "Clone Site",
+    url: "/clone",
+    icon: Copy,
   },
   {
     title: "Settings",
@@ -204,10 +240,10 @@ export function AppSidebar() {
 
       <SidebarContent>
         <SidebarGroup>
-          <SidebarGroupLabel>Navigation</SidebarGroupLabel>
+          <SidebarGroupLabel>Content</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
+              {contentItems.map((item) => {
                 const isActive = location === item.url || 
                   (item.url !== "/" && location.startsWith(item.url));
                 return (
@@ -215,7 +251,57 @@ export function AppSidebar() {
                     <SidebarMenuButton 
                       asChild 
                       isActive={isActive}
+                      data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                    >
+                      <Link href={item.url}>
+                        <item.icon className="w-4 h-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Customize</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {customizeItems.map((item) => {
+                const isActive = location === item.url;
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton 
+                      asChild 
+                      isActive={isActive}
                       data-testid={`nav-${item.title.toLowerCase()}`}
+                    >
+                      <Link href={item.url}>
+                        <item.icon className="w-4 h-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Tools</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {toolsItems.map((item) => {
+                const isActive = location === item.url;
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton 
+                      asChild 
+                      isActive={isActive}
+                      data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
                     >
                       <Link href={item.url}>
                         <item.icon className="w-4 h-4" />

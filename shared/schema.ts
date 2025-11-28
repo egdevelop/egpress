@@ -104,3 +104,61 @@ export const pageContentSchema = z.object({
 });
 
 export type PageContent = z.infer<typeof pageContentSchema>;
+
+// Site configuration schema (branding)
+export const siteConfigSchema = z.object({
+  siteName: z.string().default("My Blog"),
+  tagline: z.string().default("A modern blog"),
+  description: z.string().default(""),
+  logoUrl: z.string().optional(),
+  faviconUrl: z.string().optional(),
+  socialLinks: z.object({
+    twitter: z.string().optional(),
+    github: z.string().optional(),
+    linkedin: z.string().optional(),
+    instagram: z.string().optional(),
+    youtube: z.string().optional(),
+  }).optional(),
+  author: z.object({
+    name: z.string().default(""),
+    avatar: z.string().optional(),
+    bio: z.string().optional(),
+  }).optional(),
+});
+
+export type SiteConfig = z.infer<typeof siteConfigSchema>;
+
+// AdSense configuration schema
+export const adsenseConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  publisherId: z.string().default(""),
+  autoAdsEnabled: z.boolean().default(false),
+  slots: z.object({
+    header: z.string().optional(),
+    sidebar: z.string().optional(),
+    inArticle: z.string().optional(),
+    footer: z.string().optional(),
+  }).optional(),
+});
+
+export type AdsenseConfig = z.infer<typeof adsenseConfigSchema>;
+
+// Static page info schema
+export const staticPageSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+});
+
+export type StaticPage = z.infer<typeof staticPageSchema>;
+
+// AI generation request schema
+export const aiGenerateSchema = z.object({
+  topic: z.string().min(1, "Topic is required"),
+  keywords: z.array(z.string()).optional(),
+  tone: z.enum(["professional", "casual", "technical", "creative"]).default("professional"),
+  length: z.enum(["short", "medium", "long"]).default("medium"),
+});
+
+export type AIGenerateRequest = z.infer<typeof aiGenerateSchema>;

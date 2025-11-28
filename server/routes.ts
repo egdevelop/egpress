@@ -2,8 +2,35 @@ import type { Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected } from "./github";
+import { generateBlogPost } from "./gemini";
 import matter from "gray-matter";
-import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage } from "@shared/schema";
+import { siteConfigSchema, adsenseConfigSchema } from "@shared/schema";
+
+// Default configurations
+const defaultSiteConfig: SiteConfig = {
+  siteName: "My Blog",
+  tagline: "A modern blog",
+  description: "",
+};
+
+const defaultAdsenseConfig: AdsenseConfig = {
+  enabled: false,
+  publisherId: "",
+  autoAdsEnabled: false,
+};
+
+// Helper to find item in file tree
+function findInTree(tree: FileTreeItem[], path: string): FileTreeItem | undefined {
+  for (const item of tree) {
+    if (item.path === path) return item;
+    if (item.children) {
+      const found = findInTree(item.children, path);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
 
 // Parse repository URL (owner/repo format)
 function parseRepoUrl(url: string): { owner: string; repo: string } | null {
@@ -588,6 +615,293 @@ export async function registerRoutes(
     }
   });
 
+  // Get site config (branding)
+  app.get("/api/site-config", async (req, res) => {
+    try {
+      const config = await storage.getSiteConfig();
+      res.json({ success: true, data: config || defaultSiteConfig });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get site config" });
+    }
+  });
+
+  // Update site config
+  app.put("/api/site-config", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const parseResult = siteConfigSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.json({ success: false, error: parseResult.error.message });
+      }
+      const config = parseResult.data;
+      const configContent = JSON.stringify(config, null, 2);
+      const path = "src/config/site.json";
+
+      const octokit = await getGitHubClient();
+
+      let sha: string | undefined;
+      try {
+        const { data: currentFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path,
+          ref: repo.defaultBranch,
+        });
+        sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+      } catch {
+        // File doesn't exist yet
+      }
+
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path,
+        message: req.body.commitMessage || "Update site configuration",
+        content: Buffer.from(configContent).toString("base64"),
+        sha,
+        branch: repo.defaultBranch,
+      });
+
+      await storage.setSiteConfig(config);
+      res.json({ success: true, data: config });
+    } catch (error: any) {
+      console.error("Update site config error:", error);
+      res.json({ success: false, error: error.message || "Failed to update site config" });
+    }
+  });
+
+  // Get AdSense config
+  app.get("/api/adsense", async (req, res) => {
+    try {
+      const config = await storage.getAdsenseConfig();
+      res.json({ success: true, data: config || defaultAdsenseConfig });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get AdSense config" });
+    }
+  });
+
+  // Update AdSense config
+  app.put("/api/adsense", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const parseResult = adsenseConfigSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.json({ success: false, error: parseResult.error.message });
+      }
+      const config = parseResult.data;
+      const configContent = JSON.stringify(config, null, 2);
+      const path = "src/config/adsense.json";
+
+      const octokit = await getGitHubClient();
+
+      let sha: string | undefined;
+      try {
+        const { data: currentFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path,
+          ref: repo.defaultBranch,
+        });
+        sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+      } catch {
+        // File doesn't exist yet
+      }
+
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path,
+        message: req.body.commitMessage || "Update AdSense configuration",
+        content: Buffer.from(configContent).toString("base64"),
+        sha,
+        branch: repo.defaultBranch,
+      });
+
+      await storage.setAdsenseConfig(config);
+      res.json({ success: true, data: config });
+    } catch (error: any) {
+      console.error("Update AdSense config error:", error);
+      res.json({ success: false, error: error.message || "Failed to update AdSense config" });
+    }
+  });
+
+  // Get static pages (non-blog pages like About, Contact, etc.)
+  app.get("/api/pages", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: true, data: [] });
+      }
+
+      const pages = await storage.getStaticPages();
+      res.json({ success: true, data: pages });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get pages" });
+    }
+  });
+
+  // Clone repository to new repo
+  app.post("/api/clone-repo", async (req, res) => {
+    try {
+      const { sourceRepo, newRepoName, description } = req.body;
+
+      if (!newRepoName) {
+        return res.json({ success: false, error: "New repository name is required" });
+      }
+
+      const octokit = await getGitHubClient();
+      const user = await getAuthenticatedUser();
+
+      // Create new repository
+      const { data: newRepo } = await octokit.repos.createForAuthenticatedUser({
+        name: newRepoName,
+        description: description || `Astro blog created from ${sourceRepo || "template"}`,
+        auto_init: false,
+        private: false,
+      });
+
+      // If source repo provided, copy contents
+      if (sourceRepo) {
+        const [owner, repo] = sourceRepo.split("/");
+        
+        // Get all files from source
+        const { data: tree } = await octokit.git.getTree({
+          owner,
+          repo,
+          tree_sha: "HEAD",
+          recursive: "true",
+        });
+
+        // Get the base tree from source
+        const { data: baseCommit } = await octokit.git.getRef({
+          owner,
+          repo,
+          ref: "heads/main",
+        });
+
+        const { data: baseTree } = await octokit.git.getTree({
+          owner,
+          repo,
+          tree_sha: baseCommit.object.sha,
+          recursive: "true",
+        });
+
+        // Create blobs for each file
+        const newTreeItems: any[] = [];
+        for (const item of baseTree.tree) {
+          if (item.type === "blob" && item.path) {
+            try {
+              const { data: blob } = await octokit.git.getBlob({
+                owner,
+                repo,
+                file_sha: item.sha!,
+              });
+
+              const { data: newBlob } = await octokit.git.createBlob({
+                owner: user.login,
+                repo: newRepoName,
+                content: blob.content,
+                encoding: "base64",
+              });
+
+              newTreeItems.push({
+                path: item.path,
+                mode: item.mode,
+                type: "blob",
+                sha: newBlob.sha,
+              });
+            } catch (e) {
+              console.error(`Failed to copy file: ${item.path}`, e);
+            }
+          }
+        }
+
+        // Create tree in new repo
+        const { data: newTree } = await octokit.git.createTree({
+          owner: user.login,
+          repo: newRepoName,
+          tree: newTreeItems,
+        });
+
+        // Create initial commit
+        const { data: newCommit } = await octokit.git.createCommit({
+          owner: user.login,
+          repo: newRepoName,
+          message: `Initial commit - cloned from ${sourceRepo}`,
+          tree: newTree.sha,
+        });
+
+        // Update main branch reference
+        await octokit.git.createRef({
+          owner: user.login,
+          repo: newRepoName,
+          ref: "refs/heads/main",
+          sha: newCommit.sha,
+        });
+      }
+
+      res.json({ 
+        success: true, 
+        data: {
+          name: newRepo.name,
+          fullName: newRepo.full_name,
+          url: newRepo.html_url,
+        }
+      });
+    } catch (error: any) {
+      console.error("Clone repo error:", error);
+      res.json({ success: false, error: error.message || "Failed to clone repository" });
+    }
+  });
+
+  // AI Generate blog post
+  app.post("/api/ai/generate", async (req, res) => {
+    try {
+      const { topic, keywords, tone, length, apiKey } = req.body;
+
+      if (!topic) {
+        return res.json({ success: false, error: "Topic is required" });
+      }
+
+      if (!apiKey) {
+        return res.json({ success: false, error: "Gemini API key is required" });
+      }
+
+      const result = await generateBlogPost(apiKey, topic, keywords || [], tone || "professional", length || "medium");
+
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      console.error("AI generate error:", error);
+      res.json({ success: false, error: error.message || "Failed to generate content" });
+    }
+  });
+
+  // Check if Gemini API key is valid
+  app.post("/api/ai/validate-key", async (req, res) => {
+    try {
+      const { apiKey } = req.body;
+
+      if (!apiKey) {
+        return res.json({ success: false, error: "API key is required" });
+      }
+
+      // Try a simple request to validate the key
+      const result = await generateBlogPost(apiKey, "Test", [], "casual", "short");
+      
+      res.json({ success: true, data: { valid: true } });
+    } catch (error: any) {
+      res.json({ success: false, error: "Invalid API key" });
+    }
+  });
+
   return httpServer;
 }
 
@@ -657,4 +971,60 @@ async function syncRepositoryData(owner: string, repo: string, branch: string) {
   } catch {
     // Theme config doesn't exist, use defaults
   }
+
+  // Try to get site config
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: "src/config/site.json",
+      ref: branch,
+    });
+
+    if (!Array.isArray(data) && "content" in data) {
+      const content = Buffer.from(data.content, "base64").toString("utf-8");
+      const config = JSON.parse(content) as SiteConfig;
+      await storage.setSiteConfig(config);
+    }
+  } catch {
+    // Site config doesn't exist, use defaults
+  }
+
+  // Try to get adsense config
+  try {
+    const { data } = await octokit.repos.getContent({
+      owner,
+      repo,
+      path: "src/config/adsense.json",
+      ref: branch,
+    });
+
+    if (!Array.isArray(data) && "content" in data) {
+      const content = Buffer.from(data.content, "base64").toString("utf-8");
+      const config = JSON.parse(content) as AdsenseConfig;
+      await storage.setAdsenseConfig(config);
+    }
+  } catch {
+    // AdSense config doesn't exist, use defaults
+  }
+
+  // Get static pages from src/pages directory
+  const pageFiles = tree.tree.filter(
+    item => item.path?.startsWith("src/pages/") && 
+            item.path.endsWith(".astro") && 
+            !item.path.includes("[") // Skip dynamic routes
+  );
+
+  const staticPages: StaticPage[] = pageFiles.map(file => {
+    const path = file.path!;
+    const name = path.split("/").pop()!.replace(".astro", "");
+    return {
+      path,
+      name,
+      title: name.replace(/-/g, " ").replace(/\b\w/g, l => l.toUpperCase()),
+      description: "",
+    };
+  });
+
+  await storage.setStaticPages(staticPages);
 }

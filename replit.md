@@ -9,6 +9,11 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 - **CRUD Operations**: Create, read, update, and delete blog posts
 - **GitHub Integration**: Connect to any GitHub repository and sync changes
 - **Theme Customization**: Customize blog colors with live preview
+- **Branding Editor**: Configure site name, logo, favicon, social links, and author info
+- **AdSense Manager**: Configure Google AdSense with multiple ad slot placements
+- **Static Pages Editor**: Edit non-blog pages like About, Contact, Privacy
+- **AI Post Generator**: Generate blog posts using Google Gemini AI
+- **Site Cloner**: Clone repositories to create new blog sites
 - **File Browser**: Navigate and edit repository files
 - **Markdown Editor**: Monaco-based editor with syntax highlighting and preview
 - **Split-panel Layout**: Side-by-side editing and preview experience
@@ -103,6 +108,24 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 ### Theme
 - `GET /api/theme` - Get theme settings
 - `PUT /api/theme` - Update theme settings
+
+### Site Config (Branding)
+- `GET /api/site-config` - Get site configuration
+- `PUT /api/site-config` - Update site configuration
+
+### AdSense
+- `GET /api/adsense` - Get AdSense configuration
+- `PUT /api/adsense` - Update AdSense configuration
+
+### Static Pages
+- `GET /api/pages` - Get list of static pages
+
+### AI Generation
+- `POST /api/ai/generate` - Generate blog post with Gemini AI
+- `POST /api/ai/validate-key` - Validate Gemini API key
+
+### Clone Repository
+- `POST /api/clone-repo` - Clone current repo to new repository
 
 ### GitHub
 - `GET /api/github/status` - Check GitHub connection

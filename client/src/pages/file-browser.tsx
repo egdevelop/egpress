@@ -184,6 +184,10 @@ export default function FileBrowser() {
 
   const { data: fileContentData, isLoading: contentLoading } = useQuery<{ success: boolean; data: PageContent }>({
     queryKey: ["/api/files/content", selectedPath],
+    queryFn: async () => {
+      const response = await fetch(`/api/files/content?path=${encodeURIComponent(selectedPath!)}`);
+      return response.json();
+    },
     enabled: !!selectedPath,
   });
 

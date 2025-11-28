@@ -14,6 +14,11 @@ import FileBrowser from "@/pages/file-browser";
 import ThemeCustomizer from "@/pages/theme-customizer";
 import Settings from "@/pages/settings";
 import NotFound from "@/pages/not-found";
+import Adsense from "@/pages/adsense";
+import Branding from "@/pages/branding";
+import PagesEditor from "@/pages/pages-editor";
+import CloneSite from "@/pages/clone-site";
+import AIGenerator from "@/pages/ai-generator";
 
 function Router() {
   return (
@@ -23,6 +28,11 @@ function Router() {
       <Route path="/posts/:slug" component={PostEditor} />
       <Route path="/files" component={FileBrowser} />
       <Route path="/theme" component={ThemeCustomizer} />
+      <Route path="/pages" component={PagesEditor} />
+      <Route path="/branding" component={Branding} />
+      <Route path="/adsense" component={Adsense} />
+      <Route path="/ai" component={AIGenerator} />
+      <Route path="/clone" component={CloneSite} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>
