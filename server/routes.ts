@@ -2620,21 +2620,23 @@ ${urls.map(url => `  <url>
   // Auto-generate sitemap and submit to Google Search Console
   app.post("/api/sitemap/auto-generate", requireAuth, async (req, res) => {
     try {
+      const { domain } = req.body;
+      
+      if (!domain || typeof domain !== "string" || !domain.trim()) {
+        return res.json({ success: false, error: "Please enter a domain URL" });
+      }
+
       const repo = await storage.getRepository();
       if (!repo) {
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const config = await storage.getSearchConsoleConfig();
-      if (!config?.siteUrl) {
-        return res.json({ success: false, error: "No site selected in Search Console. Please select a site first." });
-      }
-
       const posts = await storage.getPosts();
       const octokit = await getGitHubClient();
+      const config = await storage.getSearchConsoleConfig();
 
-      // Build sitemap XML
-      const baseUrl = config.siteUrl.replace(/\/$/, "");
+      // Build sitemap XML using provided domain
+      const baseUrl = domain.trim().replace(/\/$/, "");
       const urls: { loc: string; lastmod: string; priority: string; changefreq: string }[] = [];
 
       // Add homepage
@@ -2733,8 +2735,10 @@ ${urls.map(url => `  <url>
           const searchconsole = google.searchconsole({ version: "v1", auth });
           const sitemapUrl = `${baseUrl}/sitemap.xml`;
           
+          // Use the provided domain for GSC submission
+          // This requires the domain to be verified in GSC
           await searchconsole.sitemaps.submit({
-            siteUrl: config.siteUrl,
+            siteUrl: baseUrl.endsWith("/") ? baseUrl : baseUrl + "/",
             feedpath: sitemapUrl,
           });
           

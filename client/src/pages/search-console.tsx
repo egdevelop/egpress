@@ -98,6 +98,7 @@ export default function SearchConsole() {
   const { toast } = useToast();
   const [showCredentialsDialog, setShowCredentialsDialog] = useState(false);
   const [sitemapUrl, setSitemapUrl] = useState("");
+  const [sitemapDomain, setSitemapDomain] = useState("");
   const [showSitesDialog, setShowSitesDialog] = useState(false);
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [customUrl, setCustomUrl] = useState("");
@@ -282,8 +283,8 @@ export default function SearchConsole() {
   });
 
   const autoGenerateSitemapMutation = useMutation({
-    mutationFn: async () => {
-      const response = await apiRequest("POST", "/api/sitemap/auto-generate", {});
+    mutationFn: async (domain: string) => {
+      const response = await apiRequest("POST", "/api/sitemap/auto-generate", { domain });
       return response.json();
     },
     onSuccess: (data) => {
@@ -1108,20 +1109,27 @@ export default function SearchConsole() {
               </CardHeader>
               <CardContent className="space-y-6">
                 <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
-                  <CardContent className="py-4">
-                    <div className="flex items-center justify-between gap-4 flex-wrap">
-                      <div className="space-y-1">
-                        <h4 className="font-medium flex items-center gap-2">
-                          <Wand2 className="w-4 h-4 text-primary" />
-                          Auto-Generate Sitemap
-                        </h4>
-                        <p className="text-sm text-muted-foreground">
-                          Generate sitemap.xml from your posts, commit to repo, and submit to Google
-                        </p>
-                      </div>
+                  <CardContent className="py-4 space-y-4">
+                    <div className="space-y-1">
+                      <h4 className="font-medium flex items-center gap-2">
+                        <Wand2 className="w-4 h-4 text-primary" />
+                        Auto-Generate Sitemap
+                      </h4>
+                      <p className="text-sm text-muted-foreground">
+                        Generate sitemap.xml from your posts, commit to repo, and submit to Google
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Input
+                        placeholder="https://yourblog.com"
+                        value={sitemapDomain}
+                        onChange={(e) => setSitemapDomain(e.target.value)}
+                        className="flex-1"
+                        data-testid="input-sitemap-domain"
+                      />
                       <Button
-                        onClick={() => autoGenerateSitemapMutation.mutate()}
-                        disabled={autoGenerateSitemapMutation.isPending || !config?.siteUrl}
+                        onClick={() => autoGenerateSitemapMutation.mutate(sitemapDomain)}
+                        disabled={autoGenerateSitemapMutation.isPending || !sitemapDomain.trim()}
                         data-testid="button-auto-generate-sitemap"
                       >
                         {autoGenerateSitemapMutation.isPending ? (
@@ -1132,11 +1140,9 @@ export default function SearchConsole() {
                         Generate & Submit
                       </Button>
                     </div>
-                    {!config?.siteUrl && (
-                      <p className="text-xs text-amber-600 mt-2">
-                        Select a site above before generating sitemap
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Enter your site domain (e.g., https://myblog.com) - this will be used as the base URL for all sitemap entries
+                    </p>
                   </CardContent>
                 </Card>
 
