@@ -215,41 +215,42 @@ export class VercelService {
     return (data.domains || []).map((d: any) => {
       const dnsRecords: { type: string; name: string; value: string }[] = [];
       
-      if (d.apexName) {
+      if (d.verification && Array.isArray(d.verification)) {
+        for (const v of d.verification) {
+          if (v.type && v.value) {
+            dnsRecords.push({
+              type: v.type,
+              name: v.domain || d.name,
+              value: v.value,
+            });
+          }
+        }
+      }
+      
+      if (d.cnames && Array.isArray(d.cnames)) {
+        for (const cname of d.cnames) {
+          dnsRecords.push({
+            type: "CNAME",
+            name: cname.hostname || "@",
+            value: cname.value || "cname.vercel-dns.com",
+          });
+        }
+      }
+      
+      if (d.apexName && !dnsRecords.find(r => r.type === "A")) {
         dnsRecords.push({
           type: "A",
           name: "@",
           value: "76.76.21.21",
         });
-        dnsRecords.push({
-          type: "AAAA",
-          name: "@", 
-          value: "2606:4700:7::1",
-        });
       }
       
-      if (d.name && !d.name.startsWith("www.") && d.name.includes(".")) {
-        const parts = d.name.split(".");
-        if (parts.length === 2) {
-          dnsRecords.push({
-            type: "CNAME",
-            name: "www",
-            value: "cname.vercel-dns.com",
-          });
-        } else {
-          const subdomain = parts.slice(0, -2).join(".");
-          dnsRecords.push({
-            type: "CNAME",
-            name: subdomain,
-            value: "cname.vercel-dns.com",
-          });
-        }
-      }
+      const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
 
       return {
         name: d.name,
         verified: d.verified || false,
-        configured: d.configuredBy !== undefined && d.configuredBy !== null,
+        configured: d.configured !== undefined ? d.configured : !d.misconfigured,
         createdAt: d.createdAt,
         verification: d.verification?.map((v: any) => ({
           type: v.type,
@@ -259,12 +260,12 @@ export class VercelService {
         })),
         verificationRecord: d.verification?.[0] ? {
           type: d.verification[0].type,
-          name: "_vercel",
+          name: d.verification[0].domain || "_vercel",
           value: d.verification[0].value,
         } : undefined,
-        txtVerification: d.verification?.find((v: any) => v.type === "TXT") ? {
-          name: "_vercel",
-          value: d.verification.find((v: any) => v.type === "TXT").value,
+        txtVerification: txtRecord ? {
+          name: txtRecord.domain || "_vercel",
+          value: txtRecord.value,
         } : undefined,
         configuredBy: d.configuredBy,
         apexName: d.apexName,
@@ -287,36 +288,32 @@ export class VercelService {
 
     const dnsRecords: { type: string; name: string; value: string }[] = [];
     
-    const parts = domain.split(".");
-    if (parts.length === 2) {
+    if (d.verification && Array.isArray(d.verification)) {
+      for (const v of d.verification) {
+        if (v.type && v.value) {
+          dnsRecords.push({
+            type: v.type,
+            name: v.domain || domain,
+            value: v.value,
+          });
+        }
+      }
+    }
+    
+    if (d.apexName && !dnsRecords.find(r => r.type === "A")) {
       dnsRecords.push({
         type: "A",
         name: "@",
         value: "76.76.21.21",
       });
-      dnsRecords.push({
-        type: "AAAA",
-        name: "@",
-        value: "2606:4700:7::1",
-      });
-      dnsRecords.push({
-        type: "CNAME",
-        name: "www",
-        value: "cname.vercel-dns.com",
-      });
-    } else {
-      const subdomain = parts.slice(0, -2).join(".");
-      dnsRecords.push({
-        type: "CNAME",
-        name: subdomain,
-        value: "cname.vercel-dns.com",
-      });
     }
+    
+    const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
 
     return {
       name: d.name,
       verified: d.verified || false,
-      configured: false,
+      configured: d.configured !== undefined ? d.configured : !d.misconfigured,
       createdAt: d.createdAt,
       verification: d.verification?.map((v: any) => ({
         type: v.type,
@@ -324,9 +321,9 @@ export class VercelService {
         value: v.value,
         reason: v.reason,
       })),
-      txtVerification: d.verification?.find((v: any) => v.type === "TXT") ? {
-        name: "_vercel",
-        value: d.verification.find((v: any) => v.type === "TXT").value,
+      txtVerification: txtRecord ? {
+        name: txtRecord.domain || "_vercel",
+        value: txtRecord.value,
       } : undefined,
       configuredBy: d.configuredBy,
       apexName: d.apexName,
@@ -349,36 +346,32 @@ export class VercelService {
 
     const dnsRecords: { type: string; name: string; value: string }[] = [];
     
-    const parts = domain.split(".");
-    if (parts.length === 2) {
+    if (d.verification && Array.isArray(d.verification)) {
+      for (const v of d.verification) {
+        if (v.type && v.value) {
+          dnsRecords.push({
+            type: v.type,
+            name: v.domain || domain,
+            value: v.value,
+          });
+        }
+      }
+    }
+    
+    if (d.apexName && !dnsRecords.find(r => r.type === "A")) {
       dnsRecords.push({
         type: "A",
         name: "@",
         value: "76.76.21.21",
       });
-      dnsRecords.push({
-        type: "AAAA",
-        name: "@",
-        value: "2606:4700:7::1",
-      });
-      dnsRecords.push({
-        type: "CNAME",
-        name: "www",
-        value: "cname.vercel-dns.com",
-      });
-    } else {
-      const subdomain = parts.slice(0, -2).join(".");
-      dnsRecords.push({
-        type: "CNAME",
-        name: subdomain,
-        value: "cname.vercel-dns.com",
-      });
     }
+    
+    const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
 
     return {
       name: d.name,
       verified: d.verified || false,
-      configured: d.configuredBy !== undefined && d.configuredBy !== null,
+      configured: d.configured !== undefined ? d.configured : !d.misconfigured,
       createdAt: d.createdAt,
       verification: d.verification?.map((v: any) => ({
         type: v.type,
@@ -386,9 +379,9 @@ export class VercelService {
         value: v.value,
         reason: v.reason,
       })),
-      txtVerification: d.verification?.find((v: any) => v.type === "TXT") ? {
-        name: "_vercel",
-        value: d.verification.find((v: any) => v.type === "TXT").value,
+      txtVerification: txtRecord ? {
+        name: txtRecord.domain || "_vercel",
+        value: txtRecord.value,
       } : undefined,
       configuredBy: d.configuredBy,
       apexName: d.apexName,

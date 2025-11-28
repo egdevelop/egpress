@@ -337,11 +337,27 @@ export default function VercelPage() {
   };
 
   const getDomainStatusBadge = (domain: VercelDomain) => {
-    if (domain.verified) {
+    if (domain.verified && domain.configured) {
       return (
         <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
           <CheckCircle2 className="w-3 h-3 mr-1" />
           Valid Configuration
+        </Badge>
+      );
+    }
+    if (domain.verified && !domain.configured) {
+      return (
+        <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/20">
+          <AlertTriangle className="w-3 h-3 mr-1" />
+          Pending DNS Configuration
+        </Badge>
+      );
+    }
+    if (!domain.verified && domain.verification && domain.verification.length > 0) {
+      return (
+        <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/20">
+          <Clock className="w-3 h-3 mr-1" />
+          Pending Verification
         </Badge>
       );
     }
@@ -944,12 +960,15 @@ export default function VercelPage() {
                                     <Tabs defaultValue="dns" className="w-full">
                                       <TabsList className="mb-4">
                                         <TabsTrigger value="dns">DNS Records</TabsTrigger>
+                                        {domain.txtVerification && (
+                                          <TabsTrigger value="verification">TXT Verification</TabsTrigger>
+                                        )}
                                         <TabsTrigger value="vercel-dns">Vercel DNS</TabsTrigger>
                                       </TabsList>
                                       <TabsContent value="dns">
                                         <div className="space-y-4">
                                           <p className="text-sm text-muted-foreground">
-                                            The DNS records at your provider must match the following records to verify and connect your domain to Vercel.
+                                            Configure these DNS records at your domain registrar to connect your domain to Vercel.
                                           </p>
                                           <div className="border rounded-lg overflow-hidden">
                                             <table className="w-full text-sm">
@@ -961,52 +980,66 @@ export default function VercelPage() {
                                                 </tr>
                                               </thead>
                                               <tbody>
-                                                <tr className="border-t">
-                                                  <td className="p-3">A</td>
-                                                  <td className="p-3">
-                                                    <div className="flex items-center gap-2">
-                                                      <code className="bg-muted px-2 py-1 rounded text-xs">@</code>
-                                                      <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                          <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-6 w-6"
-                                                            onClick={() => copyToClipboard('@', 'Name')}
-                                                          >
-                                                            <Copy className="w-3 h-3" />
-                                                          </Button>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>Copy</TooltipContent>
-                                                      </Tooltip>
-                                                    </div>
-                                                  </td>
-                                                  <td className="p-3">
-                                                    <div className="flex items-center gap-2">
-                                                      <code className="bg-muted px-2 py-1 rounded text-xs">76.76.21.21</code>
-                                                      <Tooltip>
-                                                        <TooltipTrigger asChild>
-                                                          <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-6 w-6"
-                                                            onClick={() => copyToClipboard('76.76.21.21', 'IP Address')}
-                                                          >
-                                                            <Copy className="w-3 h-3" />
-                                                          </Button>
-                                                        </TooltipTrigger>
-                                                        <TooltipContent>Copy</TooltipContent>
-                                                      </Tooltip>
-                                                    </div>
-                                                  </td>
-                                                </tr>
+                                                {domain.dnsRecords && domain.dnsRecords.length > 0 ? (
+                                                  domain.dnsRecords.map((record, idx) => (
+                                                    <tr key={idx} className="border-t">
+                                                      <td className="p-3">
+                                                        <Badge variant="outline" className="text-xs font-mono">
+                                                          {record.type}
+                                                        </Badge>
+                                                      </td>
+                                                      <td className="p-3">
+                                                        <div className="flex items-center gap-2">
+                                                          <code className="bg-muted px-2 py-1 rounded text-xs">{record.name}</code>
+                                                          <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                              <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-6 w-6"
+                                                                onClick={() => copyToClipboard(record.name, 'Name')}
+                                                              >
+                                                                <Copy className="w-3 h-3" />
+                                                              </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>Copy</TooltipContent>
+                                                          </Tooltip>
+                                                        </div>
+                                                      </td>
+                                                      <td className="p-3">
+                                                        <div className="flex items-center gap-2">
+                                                          <code className="bg-muted px-2 py-1 rounded text-xs">{record.value}</code>
+                                                          <Tooltip>
+                                                            <TooltipTrigger asChild>
+                                                              <Button
+                                                                variant="ghost"
+                                                                size="icon"
+                                                                className="h-6 w-6"
+                                                                onClick={() => copyToClipboard(record.value, 'Value')}
+                                                              >
+                                                                <Copy className="w-3 h-3" />
+                                                              </Button>
+                                                            </TooltipTrigger>
+                                                            <TooltipContent>Copy</TooltipContent>
+                                                          </Tooltip>
+                                                        </div>
+                                                      </td>
+                                                    </tr>
+                                                  ))
+                                                ) : (
+                                                  <tr className="border-t">
+                                                    <td colSpan={3} className="p-4 text-center text-muted-foreground">
+                                                      No DNS records available. Click Refresh to update domain status.
+                                                    </td>
+                                                  </tr>
+                                                )}
                                               </tbody>
                                             </table>
                                           </div>
                                           <div className="flex items-start gap-2 p-3 rounded-lg bg-muted/50 text-sm text-muted-foreground">
                                             <Info className="w-4 h-4 mt-0.5 shrink-0" />
                                             <p>
-                                              It might take some time for the DNS records to apply.{" "}
+                                              DNS changes can take up to 48 hours to propagate globally.{" "}
                                               <a href="https://vercel.com/docs/projects/domains" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
                                                 Learn More
                                               </a>
@@ -1014,6 +1047,75 @@ export default function VercelPage() {
                                           </div>
                                         </div>
                                       </TabsContent>
+                                      {domain.txtVerification && (
+                                        <TabsContent value="verification">
+                                          <div className="space-y-4">
+                                            <p className="text-sm text-muted-foreground">
+                                              Add this TXT record to verify domain ownership:
+                                            </p>
+                                            <div className="border rounded-lg overflow-hidden">
+                                              <table className="w-full text-sm">
+                                                <thead className="bg-muted/50">
+                                                  <tr>
+                                                    <th className="text-left p-3 font-medium">Type</th>
+                                                    <th className="text-left p-3 font-medium">Name</th>
+                                                    <th className="text-left p-3 font-medium">Value</th>
+                                                  </tr>
+                                                </thead>
+                                                <tbody>
+                                                  <tr className="border-t">
+                                                    <td className="p-3">
+                                                      <Badge variant="outline" className="text-xs font-mono">TXT</Badge>
+                                                    </td>
+                                                    <td className="p-3">
+                                                      <div className="flex items-center gap-2">
+                                                        <code className="bg-muted px-2 py-1 rounded text-xs">{domain.txtVerification.name}</code>
+                                                        <Tooltip>
+                                                          <TooltipTrigger asChild>
+                                                            <Button
+                                                              variant="ghost"
+                                                              size="icon"
+                                                              className="h-6 w-6"
+                                                              onClick={() => copyToClipboard(domain.txtVerification!.name, 'Name')}
+                                                            >
+                                                              <Copy className="w-3 h-3" />
+                                                            </Button>
+                                                          </TooltipTrigger>
+                                                          <TooltipContent>Copy</TooltipContent>
+                                                        </Tooltip>
+                                                      </div>
+                                                    </td>
+                                                    <td className="p-3">
+                                                      <div className="flex items-center gap-2">
+                                                        <code className="bg-muted px-2 py-1 rounded text-xs break-all max-w-xs">{domain.txtVerification.value}</code>
+                                                        <Tooltip>
+                                                          <TooltipTrigger asChild>
+                                                            <Button
+                                                              variant="ghost"
+                                                              size="icon"
+                                                              className="h-6 w-6"
+                                                              onClick={() => copyToClipboard(domain.txtVerification!.value, 'Value')}
+                                                            >
+                                                              <Copy className="w-3 h-3" />
+                                                            </Button>
+                                                          </TooltipTrigger>
+                                                          <TooltipContent>Copy</TooltipContent>
+                                                        </Tooltip>
+                                                      </div>
+                                                    </td>
+                                                  </tr>
+                                                </tbody>
+                                              </table>
+                                            </div>
+                                            <div className="flex items-start gap-2 p-3 rounded-lg bg-amber-500/10 text-sm">
+                                              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
+                                              <p className="text-amber-600 dark:text-amber-400">
+                                                This TXT record is required for domain verification. Add it to your DNS provider before proceeding.
+                                              </p>
+                                            </div>
+                                          </div>
+                                        </TabsContent>
+                                      )}
                                       <TabsContent value="vercel-dns">
                                         <div className="text-center py-8 text-muted-foreground">
                                           <p>Transfer your domain to Vercel DNS for automatic configuration</p>
