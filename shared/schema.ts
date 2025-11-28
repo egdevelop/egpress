@@ -7,11 +7,22 @@ export const repositorySchema = z.object({
   name: z.string(),
   fullName: z.string(),
   defaultBranch: z.string(),
+  activeBranch: z.string(), // Branch being edited (main = template, others = sites)
   connected: z.boolean(),
   lastSynced: z.string().optional(),
 });
 
 export type Repository = z.infer<typeof repositorySchema>;
+
+// Branch/Site info schema
+export const branchInfoSchema = z.object({
+  name: z.string(),
+  domain: z.string().optional(), // Domain name if this is a site branch
+  isTemplate: z.boolean(), // True if this is the main/template branch
+  lastCommit: z.string().optional(),
+});
+
+export type BranchInfo = z.infer<typeof branchInfoSchema>;
 
 export const insertRepositorySchema = repositorySchema.omit({ id: true });
 export type InsertRepository = z.infer<typeof insertRepositorySchema>;
@@ -152,6 +163,28 @@ export const staticPageSchema = z.object({
 });
 
 export type StaticPage = z.infer<typeof staticPageSchema>;
+
+// Editable content block for static pages
+export const contentBlockSchema = z.object({
+  id: z.string(),
+  type: z.enum(["title", "heading", "paragraph", "list", "image", "link"]),
+  value: z.string(),
+  metadata: z.record(z.string()).optional(), // For additional attributes like href, src, alt
+});
+
+export type ContentBlock = z.infer<typeof contentBlockSchema>;
+
+// Static page with parsed editable content
+export const editablePageSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  title: z.string(),
+  description: z.string().optional(),
+  content: z.array(contentBlockSchema), // Parsed editable content blocks
+  rawContent: z.string(), // Original Astro file content for reference
+});
+
+export type EditablePage = z.infer<typeof editablePageSchema>;
 
 // AI generation request schema
 export const aiGenerateSchema = z.object({

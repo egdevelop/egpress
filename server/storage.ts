@@ -1,4 +1,4 @@
-import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface IStorage {
@@ -6,6 +6,11 @@ export interface IStorage {
   getRepository(): Promise<Repository | null>;
   setRepository(repo: Repository): Promise<void>;
   clearRepository(): Promise<void>;
+  
+  // Branch management
+  setActiveBranch(branch: string): Promise<void>;
+  getBranches(): Promise<BranchInfo[]>;
+  setBranches(branches: BranchInfo[]): Promise<void>;
 
   // Posts (cached from GitHub)
   getPosts(): Promise<Post[]>;
@@ -23,6 +28,7 @@ export interface IStorage {
   // File content (cached from GitHub)
   getFileContent(path: string): Promise<string | undefined>;
   setFileContent(path: string, content: string): Promise<void>;
+  clearFileContents(): Promise<void>;
 
   // Site config (branding)
   getSiteConfig(): Promise<SiteConfig | null>;
@@ -39,6 +45,7 @@ export interface IStorage {
 
 export class MemStorage implements IStorage {
   private repository: Repository | null = null;
+  private branches: BranchInfo[] = [];
   private posts: Map<string, Post> = new Map();
   private theme: ThemeSettings | null = null;
   private fileTree: FileTreeItem[] = [];
@@ -57,6 +64,7 @@ export class MemStorage implements IStorage {
 
   async clearRepository(): Promise<void> {
     this.repository = null;
+    this.branches = [];
     this.posts.clear();
     this.theme = null;
     this.fileTree = [];
@@ -64,6 +72,32 @@ export class MemStorage implements IStorage {
     this.siteConfig = null;
     this.adsenseConfig = null;
     this.staticPages = [];
+  }
+  
+  async setActiveBranch(branch: string): Promise<void> {
+    if (this.repository) {
+      this.repository = { ...this.repository, activeBranch: branch };
+      // Clear cached content when switching branches
+      this.posts.clear();
+      this.theme = null;
+      this.fileTree = [];
+      this.fileContents.clear();
+      this.siteConfig = null;
+      this.adsenseConfig = null;
+      this.staticPages = [];
+    }
+  }
+  
+  async getBranches(): Promise<BranchInfo[]> {
+    return this.branches;
+  }
+  
+  async setBranches(branches: BranchInfo[]): Promise<void> {
+    this.branches = branches;
+  }
+  
+  async clearFileContents(): Promise<void> {
+    this.fileContents.clear();
   }
 
   async getPosts(): Promise<Post[]> {

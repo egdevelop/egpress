@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected } from "./github";
 import { generateBlogPost } from "./gemini";
 import matter from "gray-matter";
-import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
 import { siteConfigSchema, adsenseConfigSchema } from "@shared/schema";
 
 // Default configurations
@@ -220,13 +220,15 @@ export async function registerRoutes(
         name: parsed.repo,
         fullName: repoData.full_name,
         defaultBranch: repoData.default_branch,
+        activeBranch: repoData.default_branch, // Start on template branch
         connected: true,
         lastSynced: new Date().toISOString(),
       };
 
       await storage.setRepository(repository);
 
-      // Fetch initial data
+      // Fetch branches and initial data
+      await fetchBranches(parsed.owner, parsed.repo);
       await syncRepositoryData(parsed.owner, parsed.repo, repoData.default_branch);
 
       res.json({ success: true, data: repository });
@@ -259,7 +261,8 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      await syncRepositoryData(repo.owner, repo.name, repo.defaultBranch);
+      await fetchBranches(repo.owner, repo.name);
+      await syncRepositoryData(repo.owner, repo.name, repo.activeBranch);
       
       repo.lastSynced = new Date().toISOString();
       await storage.setRepository(repo);
@@ -268,6 +271,102 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Sync error:", error);
       res.json({ success: false, error: "Failed to sync repository" });
+    }
+  });
+  
+  // Get all branches (sites)
+  app.get("/api/branches", async (req, res) => {
+    try {
+      const branches = await storage.getBranches();
+      res.json({ success: true, data: branches });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get branches" });
+    }
+  });
+  
+  // Create new branch (new site from template)
+  app.post("/api/branches", async (req, res) => {
+    try {
+      const { domain } = req.body;
+      
+      if (!domain) {
+        return res.json({ success: false, error: "Domain name is required" });
+      }
+      
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+      
+      // Sanitize domain to branch name (e.g., "my-blog.com" -> "site-my-blog-com")
+      const branchName = `site-${domain.replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase()}`;
+      
+      const octokit = await getGitHubClient();
+      
+      // Get the SHA of the template branch (main/defaultBranch)
+      const { data: ref } = await octokit.git.getRef({
+        owner: repo.owner,
+        repo: repo.name,
+        ref: `heads/${repo.defaultBranch}`,
+      });
+      
+      // Create new branch from template
+      await octokit.git.createRef({
+        owner: repo.owner,
+        repo: repo.name,
+        ref: `refs/heads/${branchName}`,
+        sha: ref.object.sha,
+      });
+      
+      // Update branches list
+      await fetchBranches(repo.owner, repo.name);
+      
+      // Switch to the new branch
+      await storage.setActiveBranch(branchName);
+      await syncRepositoryData(repo.owner, repo.name, branchName);
+      
+      res.json({ 
+        success: true, 
+        data: { 
+          name: branchName, 
+          domain,
+          isTemplate: false 
+        } 
+      });
+    } catch (error: any) {
+      console.error("Create branch error:", error);
+      if (error.status === 422) {
+        res.json({ success: false, error: "Branch already exists" });
+      } else {
+        res.json({ success: false, error: error.message || "Failed to create branch" });
+      }
+    }
+  });
+  
+  // Switch active branch
+  app.post("/api/branches/switch", async (req, res) => {
+    try {
+      const { branch } = req.body;
+      
+      if (!branch) {
+        return res.json({ success: false, error: "Branch name is required" });
+      }
+      
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+      
+      // Clear caches and switch branch
+      await storage.setActiveBranch(branch);
+      
+      // Sync data from new branch
+      await syncRepositoryData(repo.owner, repo.name, branch);
+      
+      res.json({ success: true, data: { activeBranch: branch } });
+    } catch (error: any) {
+      console.error("Switch branch error:", error);
+      res.json({ success: false, error: error.message || "Failed to switch branch" });
     }
   });
 
@@ -318,7 +417,7 @@ export async function registerRoutes(
         path,
         message: commitMessage || `Create post: ${title}`,
         content: Buffer.from(fileContent).toString("base64"),
-        branch: repo.defaultBranch,
+        branch: repo.activeBranch,
       });
 
       const newPost: Post = {
@@ -365,7 +464,7 @@ export async function registerRoutes(
         owner: repo.owner,
         repo: repo.name,
         path: existingPost.path,
-        ref: repo.defaultBranch,
+        ref: repo.activeBranch,
       });
 
       const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
@@ -378,7 +477,7 @@ export async function registerRoutes(
         message: commitMessage || `Update post: ${title}`,
         content: Buffer.from(fileContent).toString("base64"),
         sha,
-        branch: repo.defaultBranch,
+        branch: repo.activeBranch,
       });
 
       const updatedPost: Post = {
@@ -423,7 +522,7 @@ export async function registerRoutes(
         owner: repo.owner,
         repo: repo.name,
         path: existingPost.path,
-        ref: repo.defaultBranch,
+        ref: repo.activeBranch,
       });
 
       const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
@@ -435,7 +534,7 @@ export async function registerRoutes(
         path: existingPost.path,
         message: `Delete post: ${existingPost.title}`,
         sha: sha!,
-        branch: repo.defaultBranch,
+        branch: repo.activeBranch,
       });
 
       // Update cache
@@ -478,7 +577,7 @@ export async function registerRoutes(
         owner: repo.owner,
         repo: repo.name,
         path,
-        ref: repo.defaultBranch,
+        ref: repo.activeBranch,
       });
 
       if (Array.isArray(data) || !("content" in data)) {
@@ -522,7 +621,7 @@ export async function registerRoutes(
         owner: repo.owner,
         repo: repo.name,
         path,
-        ref: repo.defaultBranch,
+        ref: repo.activeBranch,
       });
 
       const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
@@ -535,7 +634,7 @@ export async function registerRoutes(
         message: commitMessage || `Update ${path}`,
         content: Buffer.from(content).toString("base64"),
         sha,
-        branch: repo.defaultBranch,
+        branch: repo.activeBranch,
       });
 
       await storage.setFileContent(path, content);
@@ -589,7 +688,7 @@ export async function registerRoutes(
           owner: repo.owner,
           repo: repo.name,
           path,
-          ref: repo.defaultBranch,
+          ref: repo.activeBranch,
         });
         sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
       } catch {
@@ -603,7 +702,7 @@ export async function registerRoutes(
         message: commitMessage || "Update theme configuration",
         content: Buffer.from(themeContent).toString("base64"),
         sha,
-        branch: repo.defaultBranch,
+        branch: repo.activeBranch,
       });
 
       await storage.setTheme(theme);
@@ -649,7 +748,7 @@ export async function registerRoutes(
           owner: repo.owner,
           repo: repo.name,
           path,
-          ref: repo.defaultBranch,
+          ref: repo.activeBranch,
         });
         sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
       } catch {
@@ -663,7 +762,7 @@ export async function registerRoutes(
         message: req.body.commitMessage || "Update site configuration",
         content: Buffer.from(configContent).toString("base64"),
         sha,
-        branch: repo.defaultBranch,
+        branch: repo.activeBranch,
       });
 
       await storage.setSiteConfig(config);
@@ -708,7 +807,7 @@ export async function registerRoutes(
           owner: repo.owner,
           repo: repo.name,
           path,
-          ref: repo.defaultBranch,
+          ref: repo.activeBranch,
         });
         sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
       } catch {
@@ -722,7 +821,7 @@ export async function registerRoutes(
         message: req.body.commitMessage || "Update AdSense configuration",
         content: Buffer.from(configContent).toString("base64"),
         sha,
-        branch: repo.defaultBranch,
+        branch: repo.activeBranch,
       });
 
       await storage.setAdsenseConfig(config);
@@ -1027,4 +1126,34 @@ async function syncRepositoryData(owner: string, repo: string, branch: string) {
   });
 
   await storage.setStaticPages(staticPages);
+}
+
+// Helper function to fetch all branches from the repository
+async function fetchBranches(owner: string, repo: string) {
+  const octokit = await getGitHubClient();
+  const repository = await storage.getRepository();
+  
+  if (!repository) return;
+  
+  const { data: branches } = await octokit.repos.listBranches({
+    owner,
+    repo,
+    per_page: 100,
+  });
+  
+  const branchInfos: BranchInfo[] = branches.map(branch => {
+    const isTemplate = branch.name === repository.defaultBranch;
+    const domain = branch.name.startsWith("site-") 
+      ? branch.name.replace(/^site-/, "").replace(/-/g, ".")
+      : undefined;
+    
+    return {
+      name: branch.name,
+      domain,
+      isTemplate,
+      lastCommit: branch.commit.sha,
+    };
+  });
+  
+  await storage.setBranches(branchInfos);
 }
