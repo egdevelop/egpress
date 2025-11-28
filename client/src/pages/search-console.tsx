@@ -51,7 +51,11 @@ import {
   AlertCircle,
   CheckCircle2,
   Loader2,
-  Trash2
+  Trash2,
+  Plus,
+  Copy,
+  Wand2,
+  FileCode
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -97,6 +101,10 @@ export default function SearchConsole() {
   const [showSitesDialog, setShowSitesDialog] = useState(false);
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [customUrl, setCustomUrl] = useState("");
+  const [showAddDomainDialog, setShowAddDomainDialog] = useState(false);
+  const [newDomainUrl, setNewDomainUrl] = useState("");
+  const [verificationToken, setVerificationToken] = useState("");
+  const [verificationStep, setVerificationStep] = useState<"enter" | "verify" | "confirm">("enter");
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
@@ -270,6 +278,123 @@ export default function SearchConsole() {
           variant: "destructive",
         });
       }
+    },
+  });
+
+  const autoGenerateSitemapMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/sitemap/auto-generate", {});
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Sitemap Generated",
+          description: data.message || `Generated sitemap with ${data.urlCount} URLs`,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/search-console/sitemaps"] });
+      } else {
+        toast({
+          title: "Generation Failed",
+          description: data.error || "Failed to generate sitemap",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Generation Failed",
+        description: "An error occurred while generating sitemap",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const getVerificationTokenMutation = useMutation({
+    mutationFn: async (siteUrl: string) => {
+      const response = await apiRequest("POST", "/api/search-console/verify-domain", { siteUrl, method: "FILE" });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        setVerificationToken(data.token);
+        setVerificationStep("verify");
+      } else {
+        toast({
+          title: "Failed to Get Token",
+          description: data.error || "Could not get verification token",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Failed to Get Token",
+        description: "An error occurred while getting verification token",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const commitVerificationMutation = useMutation({
+    mutationFn: async (token: string) => {
+      const response = await apiRequest("POST", "/api/search-console/commit-verification", { token, siteUrl: newDomainUrl });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Verification File Committed",
+          description: "Deploy your site, then click 'Verify & Add Site'",
+        });
+        setVerificationStep("confirm");
+      } else {
+        toast({
+          title: "Commit Failed",
+          description: data.error || "Failed to commit verification file",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Commit Failed",
+        description: "An error occurred while committing verification file",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const addSiteMutation = useMutation({
+    mutationFn: async (siteUrl: string) => {
+      const response = await apiRequest("POST", "/api/search-console/add-site", { siteUrl });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Site Added",
+          description: "Site has been verified and added to Search Console!",
+        });
+        setShowAddDomainDialog(false);
+        setNewDomainUrl("");
+        setVerificationToken("");
+        setVerificationStep("enter");
+        queryClient.invalidateQueries({ queryKey: ["/api/search-console/sites"] });
+      } else {
+        toast({
+          title: "Verification Failed",
+          description: data.error || "Failed to verify site",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Verification Failed",
+        description: "An error occurred while verifying site",
+        variant: "destructive",
+      });
     },
   });
 
@@ -559,15 +684,25 @@ export default function SearchConsole() {
                       </ol>
                     </div>
                     
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => refetchSites()}
-                      data-testid="button-refresh-sites"
-                    >
-                      <RefreshCw className="w-4 h-4 mr-2" />
-                      Retry
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => refetchSites()}
+                        data-testid="button-refresh-sites"
+                      >
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Retry
+                      </Button>
+                      <Button
+                        size="sm"
+                        onClick={() => setShowAddDomainDialog(true)}
+                        data-testid="button-add-domain"
+                      >
+                        <Plus className="w-4 h-4 mr-2" />
+                        Add Domain
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </CardContent>
@@ -630,6 +765,160 @@ export default function SearchConsole() {
                   </div>
                 )}
               </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => {
+                  setShowSitesDialog(false);
+                  setShowAddDomainDialog(true);
+                }}>
+                  <Plus className="w-4 h-4 mr-2" />
+                  Add New Domain
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog open={showAddDomainDialog} onOpenChange={(open) => {
+            setShowAddDomainDialog(open);
+            if (!open) {
+              setNewDomainUrl("");
+              setVerificationToken("");
+              setVerificationStep("enter");
+            }
+          }}>
+            <DialogContent className="max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Add New Domain</DialogTitle>
+                <DialogDescription>
+                  Verify and add a new site to Google Search Console
+                </DialogDescription>
+              </DialogHeader>
+
+              {verificationStep === "enter" && (
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Site URL</label>
+                    <Input
+                      placeholder="https://yourblog.com"
+                      value={newDomainUrl}
+                      onChange={(e) => setNewDomainUrl(e.target.value)}
+                      data-testid="input-new-domain-url"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter the full URL including https://
+                    </p>
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={() => getVerificationTokenMutation.mutate(newDomainUrl)}
+                    disabled={!newDomainUrl.trim() || getVerificationTokenMutation.isPending}
+                    data-testid="button-get-verification-token"
+                  >
+                    {getVerificationTokenMutation.isPending ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Key className="w-4 h-4 mr-2" />
+                    )}
+                    Get Verification Token
+                  </Button>
+                </div>
+              )}
+
+              {verificationStep === "verify" && (
+                <div className="space-y-4">
+                  <div className="bg-muted/50 rounded-lg p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-medium">Verification File</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          navigator.clipboard.writeText(verificationToken);
+                          toast({ title: "Copied!", description: "Token copied to clipboard" });
+                        }}
+                      >
+                        <Copy className="w-4 h-4 mr-1" />
+                        Copy
+                      </Button>
+                    </div>
+                    <code className="block text-xs bg-background p-2 rounded border break-all">
+                      {verificationToken}
+                    </code>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      A verification file will be committed to your repository at:
+                    </p>
+                    <code className="block text-xs bg-muted p-2 rounded">
+                      public/{verificationToken}
+                    </code>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setVerificationStep("enter")}
+                      className="flex-1"
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      onClick={() => commitVerificationMutation.mutate(verificationToken)}
+                      disabled={commitVerificationMutation.isPending}
+                      className="flex-1"
+                      data-testid="button-commit-verification"
+                    >
+                      {commitVerificationMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <FileCode className="w-4 h-4 mr-2" />
+                      )}
+                      Commit to Repo
+                    </Button>
+                  </div>
+                </div>
+              )}
+
+              {verificationStep === "confirm" && (
+                <div className="space-y-4">
+                  <Card className="border-amber-200 bg-amber-50/50">
+                    <CardContent className="py-4">
+                      <div className="flex items-start gap-3">
+                        <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                        <div className="text-sm text-amber-800">
+                          <p className="font-medium">Deploy your site first!</p>
+                          <p className="mt-1">
+                            The verification file has been committed. Deploy your site to Vercel (or your hosting provider) so Google can access the file.
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => setVerificationStep("verify")}
+                      className="flex-1"
+                    >
+                      Back
+                    </Button>
+                    <Button
+                      onClick={() => addSiteMutation.mutate(newDomainUrl)}
+                      disabled={addSiteMutation.isPending}
+                      className="flex-1"
+                      data-testid="button-verify-site"
+                    >
+                      {addSiteMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                      )}
+                      Verify & Add Site
+                    </Button>
+                  </div>
+                </div>
+              )}
             </DialogContent>
           </Dialog>
         </div>
@@ -802,7 +1091,7 @@ export default function SearchConsole() {
                   <div>
                     <CardTitle>Sitemap Management</CardTitle>
                     <CardDescription>
-                      Submit and manage sitemaps for your site
+                      Generate, commit, and submit sitemaps for your site
                     </CardDescription>
                   </div>
                   <Button
@@ -818,8 +1107,41 @@ export default function SearchConsole() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
+                <Card className="bg-gradient-to-r from-primary/5 to-primary/10 border-primary/20">
+                  <CardContent className="py-4">
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                      <div className="space-y-1">
+                        <h4 className="font-medium flex items-center gap-2">
+                          <Wand2 className="w-4 h-4 text-primary" />
+                          Auto-Generate Sitemap
+                        </h4>
+                        <p className="text-sm text-muted-foreground">
+                          Generate sitemap.xml from your posts, commit to repo, and submit to Google
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => autoGenerateSitemapMutation.mutate()}
+                        disabled={autoGenerateSitemapMutation.isPending || !config?.siteUrl}
+                        data-testid="button-auto-generate-sitemap"
+                      >
+                        {autoGenerateSitemapMutation.isPending ? (
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <FileCode className="w-4 h-4 mr-2" />
+                        )}
+                        Generate & Submit
+                      </Button>
+                    </div>
+                    {!config?.siteUrl && (
+                      <p className="text-xs text-amber-600 mt-2">
+                        Select a site above before generating sitemap
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+
                 <div className="space-y-3">
-                  <h4 className="font-medium">Submit New Sitemap</h4>
+                  <h4 className="font-medium">Submit Existing Sitemap</h4>
                   <div className="flex gap-2">
                     <Input
                       placeholder={`${config?.siteUrl || "https://yourblog.com"}/sitemap.xml`}
@@ -838,11 +1160,11 @@ export default function SearchConsole() {
                       ) : (
                         <Send className="w-4 h-4 mr-2" />
                       )}
-                      Submit Sitemap
+                      Submit
                     </Button>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Submit your sitemap.xml to Google for faster crawling and indexing
+                    Submit an existing sitemap.xml URL to Google
                   </p>
                 </div>
 

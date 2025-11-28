@@ -2617,6 +2617,334 @@ ${urls.map(url => `  <url>
     }
   });
 
+  // Auto-generate sitemap and submit to Google Search Console
+  app.post("/api/sitemap/auto-generate", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const config = await storage.getSearchConsoleConfig();
+      if (!config?.siteUrl) {
+        return res.json({ success: false, error: "No site selected in Search Console. Please select a site first." });
+      }
+
+      const posts = await storage.getPosts();
+      const octokit = await getGitHubClient();
+
+      // Build sitemap XML
+      const baseUrl = config.siteUrl.replace(/\/$/, "");
+      const urls: { loc: string; lastmod: string; priority: string; changefreq: string }[] = [];
+
+      // Add homepage
+      urls.push({
+        loc: baseUrl,
+        lastmod: new Date().toISOString().split("T")[0],
+        priority: "1.0",
+        changefreq: "daily",
+      });
+
+      // Add blog index
+      urls.push({
+        loc: `${baseUrl}/blog`,
+        lastmod: new Date().toISOString().split("T")[0],
+        priority: "0.9",
+        changefreq: "daily",
+      });
+
+      // Add blog posts
+      for (const post of posts) {
+        if (!post.draft) {
+          urls.push({
+            loc: `${baseUrl}/blog/${post.slug}`,
+            lastmod: post.pubDate?.split("T")[0] || new Date().toISOString().split("T")[0],
+            priority: "0.8",
+            changefreq: "weekly",
+          });
+        }
+      }
+
+      // Add static pages
+      const staticPages = await storage.getStaticPages();
+      for (const page of staticPages) {
+        const pageName = page.name.toLowerCase();
+        if (pageName !== "index" && pageName !== "404" && pageName !== "500") {
+          urls.push({
+            loc: `${baseUrl}/${pageName}`,
+            lastmod: new Date().toISOString().split("T")[0],
+            priority: "0.6",
+            changefreq: "monthly",
+          });
+        }
+      }
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map(url => `  <url>
+    <loc>${url.loc}</loc>
+    <lastmod>${url.lastmod}</lastmod>
+    <changefreq>${url.changefreq}</changefreq>
+    <priority>${url.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`;
+
+      // Check if sitemap exists
+      let sha: string | undefined;
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "public/sitemap.xml",
+          ref: repo.activeBranch,
+        });
+        if (!Array.isArray(data) && "sha" in data) {
+          sha = data.sha;
+        }
+      } catch {
+        // File doesn't exist, will create new
+      }
+
+      // Create or update file in repo
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path: "public/sitemap.xml",
+        message: "Auto-generate sitemap.xml",
+        content: Buffer.from(xml).toString("base64"),
+        branch: repo.activeBranch,
+        sha,
+      });
+
+      // Submit sitemap to Google Search Console
+      let googleSubmitSuccess = false;
+      let googleError = "";
+      
+      if (config.serviceAccountJson) {
+        try {
+          const serviceAccount = JSON.parse(config.serviceAccountJson);
+          const { google } = await import("googleapis");
+          const auth = new google.auth.JWT({
+            email: serviceAccount.client_email,
+            key: serviceAccount.private_key,
+            scopes: ["https://www.googleapis.com/auth/webmasters"],
+          });
+
+          const searchconsole = google.searchconsole({ version: "v1", auth });
+          const sitemapUrl = `${baseUrl}/sitemap.xml`;
+          
+          await searchconsole.sitemaps.submit({
+            siteUrl: config.siteUrl,
+            feedpath: sitemapUrl,
+          });
+          
+          googleSubmitSuccess = true;
+        } catch (apiError: any) {
+          console.error("Google Search Console submit error:", apiError);
+          googleError = apiError.message || "Failed to submit to Google";
+        }
+      }
+
+      res.json({ 
+        success: true, 
+        message: googleSubmitSuccess 
+          ? "Sitemap generated, saved to repo, and submitted to Google!" 
+          : `Sitemap saved to repo. ${googleError ? `Google submit failed: ${googleError}` : "Google submit skipped (no credentials)."}`,
+        repoSaved: true,
+        googleSubmitted: googleSubmitSuccess,
+        urlCount: urls.length,
+      });
+    } catch (error: any) {
+      console.error("Auto-generate sitemap error:", error);
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // ==================== DOMAIN VERIFICATION ====================
+
+  // Get verification token for a domain
+  app.post("/api/search-console/verify-domain", requireAuth, async (req, res) => {
+    try {
+      const { siteUrl, method } = req.body;
+      
+      if (!siteUrl) {
+        return res.json({ success: false, error: "Site URL is required" });
+      }
+
+      const config = await storage.getSearchConsoleConfig();
+      if (!config?.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console credentials not configured" });
+      }
+
+      const serviceAccount = JSON.parse(config.serviceAccountJson);
+      const { google } = await import("googleapis");
+      const auth = new google.auth.JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key,
+        scopes: ["https://www.googleapis.com/auth/siteverification"],
+      });
+
+      const siteVerification = google.siteVerification({ version: "v1", auth });
+
+      // Get verification token
+      const verificationMethod = method || "FILE"; // FILE or META or DNS_TXT
+      const tokenResponse = await siteVerification.webResource.getToken({
+        requestBody: {
+          site: {
+            type: "SITE",
+            identifier: siteUrl,
+          },
+          verificationMethod: verificationMethod,
+        },
+      });
+
+      res.json({ 
+        success: true, 
+        token: tokenResponse.data.token,
+        method: verificationMethod,
+        instructions: verificationMethod === "FILE" 
+          ? `Create a file at ${siteUrl}/${tokenResponse.data.token} with content: google-site-verification: ${tokenResponse.data.token}`
+          : verificationMethod === "META"
+          ? `Add this meta tag to your homepage: <meta name="google-site-verification" content="${tokenResponse.data.token}" />`
+          : `Add this DNS TXT record: ${tokenResponse.data.token}`,
+      });
+    } catch (error: any) {
+      console.error("Get verification token error:", error);
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Verify domain and add to Search Console
+  app.post("/api/search-console/add-site", requireAuth, async (req, res) => {
+    try {
+      const { siteUrl } = req.body;
+      
+      if (!siteUrl) {
+        return res.json({ success: false, error: "Site URL is required" });
+      }
+
+      const config = await storage.getSearchConsoleConfig();
+      if (!config?.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console credentials not configured" });
+      }
+
+      const serviceAccount = JSON.parse(config.serviceAccountJson);
+      const { google } = await import("googleapis");
+      const auth = new google.auth.JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key,
+        scopes: [
+          "https://www.googleapis.com/auth/siteverification",
+          "https://www.googleapis.com/auth/webmasters",
+        ],
+      });
+
+      const siteVerification = google.siteVerification({ version: "v1", auth });
+
+      // Try to verify the site
+      try {
+        await siteVerification.webResource.insert({
+          verificationMethod: "FILE",
+          requestBody: {
+            site: {
+              type: "SITE",
+              identifier: siteUrl,
+            },
+          },
+        });
+      } catch (verifyError: any) {
+        // If verification fails, return detailed error
+        if (verifyError.message?.includes("not verified")) {
+          return res.json({ 
+            success: false, 
+            error: "Site not verified. Please add the verification file first.",
+            needsVerification: true,
+          });
+        }
+        throw verifyError;
+      }
+
+      // Add site to Search Console
+      const searchconsole = google.searchconsole({ version: "v1", auth });
+      try {
+        await searchconsole.sites.add({
+          siteUrl: siteUrl,
+        });
+      } catch (addError: any) {
+        // Site might already exist
+        if (!addError.message?.includes("already exists")) {
+          throw addError;
+        }
+      }
+
+      res.json({ 
+        success: true, 
+        message: "Site verified and added to Search Console!",
+      });
+    } catch (error: any) {
+      console.error("Add site error:", error);
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Commit verification file to repo
+  app.post("/api/search-console/commit-verification", requireAuth, async (req, res) => {
+    try {
+      const { token, siteUrl } = req.body;
+      
+      if (!token) {
+        return res.json({ success: false, error: "Verification token is required" });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+
+      // Create verification file in public folder
+      const filePath = `public/${token}`;
+      const fileContent = `google-site-verification: ${token}`;
+
+      // Check if file exists
+      let sha: string | undefined;
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: filePath,
+          ref: repo.activeBranch,
+        });
+        if (!Array.isArray(data) && "sha" in data) {
+          sha = data.sha;
+        }
+      } catch {
+        // File doesn't exist, will create new
+      }
+
+      // Create or update verification file
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path: filePath,
+        message: "Add Google site verification file",
+        content: Buffer.from(fileContent).toString("base64"),
+        branch: repo.activeBranch,
+        sha,
+      });
+
+      res.json({ 
+        success: true, 
+        message: "Verification file committed to repository. Deploy your site and then click 'Verify Site'.",
+        filePath,
+      });
+    } catch (error: any) {
+      console.error("Commit verification file error:", error);
+      res.json({ success: false, error: error.message });
+    }
+  });
+
   return httpServer;
 }
 

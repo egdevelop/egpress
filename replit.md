@@ -170,6 +170,13 @@ This CMS provides a visual interface for managing blog content directly from Git
 - `POST /api/search-console/submit` - Submit URLs for indexing (uses Google Indexing API)
 - `GET /api/search-console/sitemaps` - List submitted sitemaps for selected site
 - `POST /api/search-console/submit-sitemap` - Submit sitemap to Google
+- `POST /api/search-console/verify-domain` - Get verification token for a domain
+- `POST /api/search-console/add-site` - Verify and add site to Search Console
+- `POST /api/search-console/commit-verification` - Commit verification file to repository
+
+### Sitemap Auto-Generation
+- `POST /api/sitemap/auto-generate` - Generate sitemap.xml, commit to repo, and submit to Google
+- `POST /api/sitemap/save` - Save sitemap.xml to repository
 
 ### Vercel
 - `GET /api/vercel/config` - Get Vercel configuration status
