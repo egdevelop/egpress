@@ -537,16 +537,31 @@ export default function SearchConsole() {
             <Card className="border-amber-200 bg-amber-50/50">
               <CardContent className="py-6">
                 <div className="flex items-start gap-3">
-                  <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-amber-800">No Sites Found</p>
-                    <p className="text-sm text-amber-700 mt-1">
-                      The service account doesn't have access to any sites. Make sure you've added the service account email as a user in Google Search Console for your verified sites.
-                    </p>
+                  <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="space-y-3">
+                    <div>
+                      <p className="font-medium text-amber-800">No Sites Found</p>
+                      <p className="text-sm text-amber-700 mt-1">
+                        The service account needs to be added as a user in Google Search Console.
+                      </p>
+                    </div>
+                    
+                    <div className="bg-amber-100/50 rounded-md p-3 text-sm text-amber-800 space-y-2">
+                      <p className="font-medium">How to add access:</p>
+                      <ol className="list-decimal list-inside space-y-1 text-amber-700">
+                        <li>Go to <a href="https://search.google.com/search-console/" target="_blank" rel="noopener noreferrer" className="underline hover:text-amber-900">Google Search Console</a></li>
+                        <li>Select your site/property</li>
+                        <li>Click <strong>Settings</strong> → <strong>Users and permissions</strong></li>
+                        <li>Click <strong>Add user</strong></li>
+                        <li>Enter the service account email (from <code className="bg-amber-200/50 px-1 rounded">client_email</code> in your JSON file)</li>
+                        <li>Set permission to <strong>Full</strong></li>
+                        <li>Click <strong>Add</strong></li>
+                      </ol>
+                    </div>
+                    
                     <Button
                       variant="outline"
                       size="sm"
-                      className="mt-3"
                       onClick={() => refetchSites()}
                       data-testid="button-refresh-sites"
                     >
