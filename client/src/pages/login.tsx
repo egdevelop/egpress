@@ -129,19 +129,17 @@ export default function Login() {
                       placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
                       value={token}
                       onChange={(e) => setToken(e.target.value)}
-                      className="pr-10 h-11"
+                      className="pr-11 h-11"
                       data-testid="input-login-token"
                     />
-                    <Button
+                    <button
                       type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-0 top-0 h-full"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
                       onClick={() => setShowToken(!showToken)}
                       data-testid="button-toggle-token-visibility"
                     >
                       {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </Button>
+                    </button>
                   </div>
                 </div>
 
