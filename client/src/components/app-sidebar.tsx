@@ -7,7 +7,6 @@ import {
   Github,
   RefreshCw,
   Check,
-  AlertCircle,
   DollarSign,
   Image,
   FileCode,
@@ -16,7 +15,9 @@ import {
   Search,
   Rocket,
   LogOut,
-  User
+  User,
+  ChevronsUpDown,
+  Lock
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -33,13 +34,26 @@ import {
 } from "@/components/ui/sidebar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/lib/auth-context";
-import type { Repository } from "@shared/schema";
+import type { Repository, GitHubRepo } from "@shared/schema";
 
 const contentItems = [
   {
@@ -112,16 +126,27 @@ const toolsItems = [
 
 export function AppSidebar() {
   const [location] = useLocation();
-  const [repoUrl, setRepoUrl] = useState("");
+  const [repoSelectOpen, setRepoSelectOpen] = useState(false);
+  const [repoSearch, setRepoSearch] = useState("");
   const { toast } = useToast();
   const { githubUsername, logout } = useAuth();
   const [, setLocationNav] = useLocation();
 
-  const { data: repoData, isLoading: repoLoading } = useQuery<{ success: boolean; data: Repository | null }>({
+  const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
   });
 
+  const { data: reposData, isLoading: reposLoading } = useQuery<{ success: boolean; data: GitHubRepo[] }>({
+    queryKey: ["/api/github/repos"],
+  });
+
   const repository = repoData?.data;
+  const repos = reposData?.data || [];
+  
+  const filteredRepos = repos.filter(repo => 
+    repo.fullName.toLowerCase().includes(repoSearch.toLowerCase()) ||
+    (repo.description?.toLowerCase().includes(repoSearch.toLowerCase()))
+  );
 
   const connectMutation = useMutation({
     mutationFn: async (url: string) => {
@@ -137,7 +162,7 @@ export function AppSidebar() {
         queryClient.invalidateQueries({ queryKey: ["/api/repository"] });
         queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
         queryClient.invalidateQueries({ queryKey: ["/api/files"] });
-        setRepoUrl("");
+        setRepoSelectOpen(false);
       } else {
         toast({
           title: "Connection Failed",
@@ -173,11 +198,8 @@ export function AppSidebar() {
     },
   });
 
-  const handleConnect = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (repoUrl.trim()) {
-      connectMutation.mutate(repoUrl.trim());
-    }
+  const handleSelectRepo = (fullName: string) => {
+    connectMutation.mutate(fullName);
   };
 
   return (
@@ -223,35 +245,72 @@ export function AppSidebar() {
             </Button>
           </div>
         ) : (
-          <form onSubmit={handleConnect} className="space-y-2">
+          <div className="space-y-2">
             <div className="flex items-center gap-2">
               <Github className="w-4 h-4 text-muted-foreground shrink-0" />
               <span className="text-xs text-muted-foreground">Connect Repository</span>
             </div>
-            <Input
-              placeholder="owner/repository"
-              value={repoUrl}
-              onChange={(e) => setRepoUrl(e.target.value)}
-              className="h-8 text-sm"
-              data-testid="input-repo-url"
-            />
-            <Button
-              type="submit"
-              size="sm"
-              className="w-full"
-              disabled={connectMutation.isPending || !repoUrl.trim()}
-              data-testid="button-connect-repo"
-            >
-              {connectMutation.isPending ? (
-                <>
-                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  Connecting...
-                </>
-              ) : (
-                "Connect"
-              )}
-            </Button>
-          </form>
+            
+            <Popover open={repoSelectOpen} onOpenChange={setRepoSelectOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  role="combobox"
+                  aria-expanded={repoSelectOpen}
+                  className="w-full justify-between h-9 text-sm"
+                  data-testid="button-select-repo"
+                >
+                  <span className="text-muted-foreground truncate">Select repository...</span>
+                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[280px] p-0" align="start" side="bottom">
+                <Command>
+                  <CommandInput 
+                    placeholder="Search repositories..." 
+                    value={repoSearch}
+                    onValueChange={setRepoSearch}
+                  />
+                  <CommandList>
+                    <CommandEmpty>
+                      {reposLoading ? (
+                        <div className="flex items-center justify-center py-4">
+                          <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                          Loading...
+                        </div>
+                      ) : (
+                        "No repository found."
+                      )}
+                    </CommandEmpty>
+                    <CommandGroup>
+                      <ScrollArea className="h-48">
+                        {filteredRepos.map((repo) => (
+                          <CommandItem
+                            key={repo.id}
+                            value={repo.fullName}
+                            onSelect={() => handleSelectRepo(repo.fullName)}
+                            className="cursor-pointer"
+                            data-testid={`repo-option-${repo.name}`}
+                          >
+                            <div className="flex items-center gap-2 flex-1 min-w-0">
+                              <Github className="w-4 h-4 shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-sm font-medium truncate">{repo.name}</span>
+                                  {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                </div>
+                                <p className="text-xs text-muted-foreground truncate">{repo.owner}</p>
+                              </div>
+                            </div>
+                          </CommandItem>
+                        ))}
+                      </ScrollArea>
+                    </CommandGroup>
+                  </CommandList>
+                </Command>
+              </PopoverContent>
+            </Popover>
+          </div>
         )}
       </SidebarHeader>
       <SidebarContent>
