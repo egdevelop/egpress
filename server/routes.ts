@@ -381,6 +381,135 @@ export async function registerRoutes(
     }
   });
 
+  // Check if GitHub OAuth is configured
+  app.get("/api/auth/github/config", (req, res) => {
+    const hasOAuth = !!(process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET);
+    res.json({ success: true, data: { oauthEnabled: hasOAuth } });
+  });
+
+  // GitHub OAuth - initiate login
+  app.get("/api/auth/github", (req, res) => {
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    
+    if (!clientId) {
+      return res.status(400).json({ success: false, error: "GitHub OAuth not configured" });
+    }
+
+    // Generate cryptographically secure state for CSRF protection
+    const crypto = require('crypto');
+    const state = crypto.randomBytes(32).toString('hex');
+    
+    // Store state in session for validation on callback
+    (req.session as any).oauthState = state;
+
+    // Build the callback URL dynamically
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host;
+    const redirectUri = `${protocol}://${host}/api/auth/github/callback`;
+    
+    // Request repo scope for full repository access (space-separated)
+    const scope = "repo read:user";
+    
+    const authUrl = `https://github.com/login/oauth/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=${encodeURIComponent(scope)}&state=${state}`;
+    
+    res.redirect(authUrl);
+  });
+
+  // GitHub OAuth - callback
+  app.get("/api/auth/github/callback", async (req, res) => {
+    const { code, error: oauthError, state } = req.query;
+    
+    if (oauthError) {
+      return res.redirect(`/login?error=${encodeURIComponent(oauthError as string)}`);
+    }
+    
+    if (!code || typeof code !== 'string') {
+      return res.redirect('/login?error=No authorization code received');
+    }
+
+    // Validate state parameter for CSRF protection
+    const storedState = (req.session as any).oauthState;
+    if (!state || state !== storedState) {
+      return res.redirect('/login?error=Invalid state parameter. Please try again.');
+    }
+    
+    // Clear the state from session after validation
+    delete (req.session as any).oauthState;
+
+    const clientId = process.env.GITHUB_CLIENT_ID;
+    const clientSecret = process.env.GITHUB_CLIENT_SECRET;
+    
+    if (!clientId || !clientSecret) {
+      return res.redirect('/login?error=GitHub OAuth not configured');
+    }
+
+    try {
+      // Exchange code for access token
+      const tokenResponse = await fetch('https://github.com/login/oauth/access_token', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          client_id: clientId,
+          client_secret: clientSecret,
+          code: code,
+        }),
+      });
+
+      const tokenData = await tokenResponse.json() as { access_token?: string; error?: string; error_description?: string };
+      
+      if (tokenData.error || !tokenData.access_token) {
+        return res.redirect(`/login?error=${encodeURIComponent(tokenData.error_description || tokenData.error || 'Failed to get access token')}`);
+      }
+
+      const accessToken = tokenData.access_token;
+
+      // Validate token and get user info
+      const octokit = new Octokit({ auth: accessToken });
+      const { data: user } = await octokit.users.getAuthenticated();
+      
+      // Store in session
+      req.session.githubToken = accessToken;
+      req.session.githubUsername = user.login;
+      
+      // Set as manual token for GitHub operations
+      setManualGitHubToken(accessToken);
+      
+      // Load user settings from Supabase if available
+      const savedSettings = await loadUserSettings(accessToken);
+      if (savedSettings) {
+        if (savedSettings.gemini_api_key) {
+          await storage.setGeminiApiKey(savedSettings.gemini_api_key);
+        }
+        if (savedSettings.vercel_token) {
+          await storage.setVercelConfig({
+            token: savedSettings.vercel_token,
+            teamId: savedSettings.vercel_team_id,
+            username: user.login,
+          });
+        }
+        if (savedSettings.search_console_client_email && savedSettings.search_console_private_key) {
+          await storage.setSearchConsoleConfig({
+            clientEmail: savedSettings.search_console_client_email,
+            privateKey: savedSettings.search_console_private_key,
+            siteUrl: savedSettings.search_console_site_url || "",
+          });
+        }
+      } else {
+        // Create initial settings record
+        await saveUserSettings(accessToken, user.login, {});
+      }
+      
+      // Redirect to dashboard
+      res.redirect('/');
+    } catch (error: any) {
+      console.error('GitHub OAuth callback error:', error);
+      res.redirect(`/login?error=${encodeURIComponent('Authentication failed')}`);
+    }
+  });
+
   // ============== GITHUB ROUTES ==============
 
   // Check GitHub connection status

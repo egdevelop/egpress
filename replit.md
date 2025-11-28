@@ -213,12 +213,16 @@ The application runs on port 5000 with:
 
 ### GitHub Authentication Options
 
-The CMS supports two GitHub authentication methods (in priority order):
+The CMS supports two GitHub authentication methods:
 
-1. **Environment Variable** - Set `GITHUB_TOKEN` in your environment for persistent authentication (recommended for self-hosting)
-2. **Manual Token** - Enter a Personal Access Token in Settings (stored in memory, resets on restart)
+1. **GitHub OAuth** (Recommended) - "Login with GitHub" button for easy authentication
+   - Requires setting `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` environment variables
+   - Create a GitHub OAuth App at https://github.com/settings/developers
+   - Set callback URL to: `https://your-domain.com/api/auth/github/callback`
 
-For self-hosting, create a GitHub Personal Access Token at https://github.com/settings/tokens/new with `repo` scope.
+2. **Personal Access Token** - For users who prefer manual token entry
+   - Create a token at https://github.com/settings/tokens/new with `repo` scope
+   - Token is stored in session and used to access repositories
 
 ## Self-Hosting Guide
 
@@ -237,6 +241,10 @@ SESSION_SECRET=your_random_secret_here
 
 # Optional: Port (defaults to 5000)
 PORT=5000
+
+# Optional: GitHub OAuth (recommended for easy login)
+GITHUB_CLIENT_ID=your_github_oauth_client_id
+GITHUB_CLIENT_SECRET=your_github_oauth_client_secret
 
 # Optional: Supabase for persistent settings storage
 SUPABASE_URL=https://your-project.supabase.co

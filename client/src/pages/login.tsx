@@ -1,20 +1,45 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Github, Eye, EyeOff, RefreshCw, ExternalLink, Shield, Zap, Database } from "lucide-react";
+import { Github, Eye, EyeOff, RefreshCw, ExternalLink, Shield, Zap, Database, Key } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { useQuery } from "@tanstack/react-query";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 
 export default function Login() {
   const [token, setToken] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showPATForm, setShowPATForm] = useState(false);
   const [, setLocation] = useLocation();
   const { login } = useAuth();
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Check if OAuth is configured
+  const { data: oauthConfig } = useQuery<{ success: boolean; data: { oauthEnabled: boolean } }>({
+    queryKey: ["/api/auth/github/config"],
+  });
+
+  const oauthEnabled = oauthConfig?.data?.oauthEnabled ?? false;
+
+  // Check for error from OAuth callback
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const oauthError = params.get('error');
+    if (oauthError) {
+      setError(decodeURIComponent(oauthError));
+      // Clean up URL
+      window.history.replaceState({}, '', '/login');
+    }
+  }, []);
+
+  const handlePATSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token.trim()) return;
 
@@ -30,6 +55,10 @@ export default function Login() {
     }
     
     setIsLoading(false);
+  };
+
+  const handleGitHubOAuth = () => {
+    window.location.href = '/api/auth/github';
   };
 
   return (
@@ -114,77 +143,127 @@ export default function Login() {
             </p>
           </div>
 
+          {error && (
+            <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm" data-testid="text-login-error">
+              {error}
+            </div>
+          )}
+
           <Card className="border-0 shadow-none lg:border lg:shadow-sm">
-            <CardContent className="p-0 lg:p-6">
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div className="space-y-2">
-                  <label htmlFor="token" className="text-sm font-medium flex items-center gap-2">
-                    <Shield className="w-4 h-4 text-muted-foreground" />
-                    Personal Access Token
-                  </label>
-                  <div className="relative">
-                    <Input
-                      id="token"
-                      type={showToken ? "text" : "password"}
-                      placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
-                      value={token}
-                      onChange={(e) => setToken(e.target.value)}
-                      className="pr-11 h-11"
-                      data-testid="input-login-token"
-                    />
-                    <button
-                      type="button"
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                      onClick={() => setShowToken(!showToken)}
-                      data-testid="button-toggle-token-visibility"
-                    >
-                      {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
-                  </div>
-                </div>
-
-                {error && (
-                  <div className="p-3 rounded-md bg-destructive/10 text-destructive text-sm" data-testid="text-login-error">
-                    {error}
-                  </div>
-                )}
-
+            <CardContent className="p-0 lg:p-6 space-y-4">
+              {/* Primary: Login with GitHub OAuth */}
+              {oauthEnabled ? (
                 <Button
-                  type="submit"
+                  onClick={handleGitHubOAuth}
                   className="w-full h-11"
-                  disabled={isLoading || !token.trim()}
-                  data-testid="button-login"
+                  data-testid="button-login-github"
                 >
-                  {isLoading ? (
-                    <>
-                      <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      Connecting...
-                    </>
-                  ) : (
-                    <>
-                      <Github className="w-4 h-4 mr-2" />
-                      Connect to GitHub
-                    </>
-                  )}
+                  <Github className="w-4 h-4 mr-2" />
+                  Login with GitHub
                 </Button>
-
-                <div className="pt-2">
-                  <a
-                    href="https://github.com/settings/tokens/new?scopes=repo&description=EG%20Press%20CMS"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-sm text-primary hover:underline inline-flex items-center gap-1"
-                  >
-                    Create a new token with repo scope
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
+              ) : (
+                <div className="p-3 rounded-md bg-muted text-muted-foreground text-sm text-center">
+                  GitHub OAuth not configured. Use Personal Access Token below.
                 </div>
-              </form>
+              )}
+
+              {/* Divider */}
+              {oauthEnabled && (
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <span className="w-full border-t" />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">Or</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Secondary: Personal Access Token */}
+              <Collapsible open={showPATForm || !oauthEnabled} onOpenChange={setShowPATForm}>
+                {oauthEnabled && (
+                  <CollapsibleTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="w-full h-10 text-sm"
+                      data-testid="button-show-pat-form"
+                    >
+                      <Key className="w-4 h-4 mr-2" />
+                      Use Personal Access Token
+                    </Button>
+                  </CollapsibleTrigger>
+                )}
+                
+                <CollapsibleContent className="space-y-4 pt-4">
+                  <form onSubmit={handlePATSubmit} className="space-y-4">
+                    <div className="space-y-2">
+                      <label htmlFor="token" className="text-sm font-medium flex items-center gap-2">
+                        <Shield className="w-4 h-4 text-muted-foreground" />
+                        Personal Access Token
+                      </label>
+                      <div className="relative">
+                        <Input
+                          id="token"
+                          type={showToken ? "text" : "password"}
+                          placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                          value={token}
+                          onChange={(e) => setToken(e.target.value)}
+                          className="pr-11 h-11"
+                          data-testid="input-login-token"
+                        />
+                        <button
+                          type="button"
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                          onClick={() => setShowToken(!showToken)}
+                          data-testid="button-toggle-token-visibility"
+                        >
+                          {showToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      variant="secondary"
+                      className="w-full h-11"
+                      disabled={isLoading || !token.trim()}
+                      data-testid="button-login-pat"
+                    >
+                      {isLoading ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                          Connecting...
+                        </>
+                      ) : (
+                        <>
+                          <Github className="w-4 h-4 mr-2" />
+                          Connect with Token
+                        </>
+                      )}
+                    </Button>
+
+                    <div>
+                      <a
+                        href="https://github.com/settings/tokens/new?scopes=repo&description=EG%20Press%20CMS"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                      >
+                        Create a new token with repo scope
+                        <ExternalLink className="w-3 h-3" />
+                      </a>
+                    </div>
+                  </form>
+                </CollapsibleContent>
+              </Collapsible>
             </CardContent>
           </Card>
 
           <p className="text-center text-xs text-muted-foreground">
-            Your token is stored in your session and used only to access your repositories.
+            {oauthEnabled 
+              ? "You'll be redirected to GitHub to authorize EG Press."
+              : "Your token is stored in your session and used only to access your repositories."
+            }
           </p>
         </div>
       </div>
