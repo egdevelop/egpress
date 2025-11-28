@@ -3,7 +3,25 @@ import { createServer, type Server } from "http";
 import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { generateBlogPost } from "./gemini";
-import { saveUserSettings, loadUserSettings, updateGeminiKey, updateVercelConfig, updateSearchConsoleConfig, updateAdsenseConfig, clearVercelConfig, clearSearchConsoleConfig } from "./supabase";
+import { 
+  saveUserSettings, 
+  loadUserSettings, 
+  updateGeminiKey, 
+  updateVercelConfig, 
+  updateSearchConsoleConfig, 
+  updateAdsenseConfig, 
+  clearVercelConfig, 
+  clearSearchConsoleConfig,
+  // Repository-based settings
+  getRepositorySettings,
+  saveRepositorySettings,
+  updateRepositoryVercel,
+  clearRepositoryVercel,
+  updateRepositorySearchConsole,
+  clearRepositorySearchConsole,
+  updateRepositoryGemini,
+  updateRepositoryAdsense,
+} from "./supabase";
 import matter from "gray-matter";
 import yaml from "yaml";
 import { Octokit } from "@octokit/rest";
@@ -2031,6 +2049,365 @@ export async function registerRoutes(
       
       res.json({ success: true, data: verifiedDomain });
     } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Auto-link Vercel project based on connected repository
+  app.post("/api/vercel/auto-link", requireAuth, async (req, res) => {
+    try {
+      const config = await storage.getVercelConfig();
+      if (!config?.token) {
+        return res.json({ success: false, error: "Vercel not connected. Please add your Vercel token first." });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
+      
+      // Auto-link or create project
+      const result = await vercel.autoLinkProject(repo.owner, repo.name);
+      
+      // Save project to storage
+      await storage.setVercelProject(result.project);
+      
+      // Save to Supabase with repository identifier
+      const repoFullName = `${repo.owner}/${repo.name}`;
+      await updateRepositoryVercel(
+        repoFullName,
+        config.token,
+        config.teamId,
+        result.project.id,
+        result.project.name
+      );
+      
+      // Fetch deployments and domains
+      const deployments = await vercel.getDeployments(result.project.id);
+      await storage.setVercelDeployments(deployments);
+      
+      const domains = await vercel.getDomains(result.project.id);
+      await storage.setVercelDomains(domains);
+
+      res.json({ 
+        success: true, 
+        data: {
+          project: result.project,
+          isNew: result.isNew,
+          message: result.message,
+        },
+      });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // ==================== GOOGLE SEARCH CONSOLE SERVICE ACCOUNT ====================
+
+  // List sites from Google Search Console service account
+  app.get("/api/search-console/sites", async (_req, res) => {
+    try {
+      const config = await storage.getSearchConsoleConfig();
+      if (!config?.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console service account not configured" });
+      }
+
+      // Parse service account JSON
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(config.serviceAccountJson);
+      } catch {
+        return res.json({ success: false, error: "Invalid service account JSON" });
+      }
+
+      // Use Google Search Console API to list sites
+      const { google } = await import("googleapis");
+      const auth = new google.auth.JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key,
+        scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+      });
+
+      const searchconsole = google.searchconsole({ version: "v1", auth });
+      
+      try {
+        const response = await searchconsole.sites.list();
+        const sites = (response.data.siteEntry || []).map((site: any) => ({
+          siteUrl: site.siteUrl,
+          permissionLevel: site.permissionLevel,
+        }));
+        
+        res.json({ success: true, data: sites });
+      } catch (apiError: any) {
+        console.error("Search Console API error:", apiError);
+        res.json({ 
+          success: false, 
+          error: apiError.message || "Failed to fetch sites from Google Search Console" 
+        });
+      }
+    } catch (error: any) {
+      console.error("List sites error:", error);
+      res.json({ success: false, error: error.message || "Failed to list sites" });
+    }
+  });
+
+  // Select site from Google Search Console
+  app.post("/api/search-console/select-site", requireAuth, async (req, res) => {
+    try {
+      const { siteUrl } = req.body;
+      if (!siteUrl) {
+        return res.json({ success: false, error: "Site URL is required" });
+      }
+
+      const config = await storage.getSearchConsoleConfig();
+      if (!config?.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console not configured" });
+      }
+
+      // Update storage with selected site
+      await storage.setSearchConsoleConfig({
+        ...config,
+        siteUrl,
+      });
+
+      // Update Supabase with repository identifier
+      const repo = await storage.getRepository();
+      if (repo) {
+        const repoFullName = `${repo.owner}/${repo.name}`;
+        await updateRepositorySearchConsole(repoFullName, config.serviceAccountJson, siteUrl);
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // ==================== SITEMAP GENERATION ====================
+
+  // Generate sitemap.xml
+  app.get("/api/sitemap.xml", async (_req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      const posts = await storage.getPosts();
+      const config = await storage.getSearchConsoleConfig();
+      
+      if (!repo) {
+        return res.status(404).send("No repository connected");
+      }
+
+      // Determine base URL from Search Console config or Vercel domain
+      let baseUrl = config?.siteUrl || "";
+      
+      if (!baseUrl) {
+        const vercelProject = await storage.getVercelProject();
+        if (vercelProject?.productionUrl) {
+          baseUrl = `https://${vercelProject.productionUrl}`;
+        } else {
+          const domains = await storage.getVercelDomains();
+          const verifiedDomain = domains.find(d => d.verified && d.configured);
+          if (verifiedDomain) {
+            baseUrl = `https://${verifiedDomain.name}`;
+          }
+        }
+      }
+
+      if (!baseUrl) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "No base URL configured. Please set up a domain in Vercel or configure Search Console." 
+        });
+      }
+
+      // Ensure baseUrl doesn't have trailing slash
+      baseUrl = baseUrl.replace(/\/$/, "");
+
+      // Build sitemap XML
+      const urls: { loc: string; lastmod?: string; priority: string; changefreq: string }[] = [];
+
+      // Add homepage
+      urls.push({
+        loc: baseUrl,
+        lastmod: new Date().toISOString().split("T")[0],
+        priority: "1.0",
+        changefreq: "daily",
+      });
+
+      // Add blog index
+      urls.push({
+        loc: `${baseUrl}/blog`,
+        lastmod: new Date().toISOString().split("T")[0],
+        priority: "0.9",
+        changefreq: "daily",
+      });
+
+      // Add blog posts
+      for (const post of posts) {
+        if (!post.draft) {
+          urls.push({
+            loc: `${baseUrl}/blog/${post.slug}`,
+            lastmod: post.pubDate?.split("T")[0] || new Date().toISOString().split("T")[0],
+            priority: "0.8",
+            changefreq: "weekly",
+          });
+        }
+      }
+
+      // Add static pages
+      const staticPages = await storage.getStaticPages();
+      for (const page of staticPages) {
+        const pageName = page.name.toLowerCase();
+        if (pageName !== "index" && pageName !== "404" && pageName !== "500") {
+          urls.push({
+            loc: `${baseUrl}/${pageName}`,
+            lastmod: new Date().toISOString().split("T")[0],
+            priority: "0.6",
+            changefreq: "monthly",
+          });
+        }
+      }
+
+      // Generate XML
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map(url => `  <url>
+    <loc>${url.loc}</loc>
+    <lastmod>${url.lastmod}</lastmod>
+    <changefreq>${url.changefreq}</changefreq>
+    <priority>${url.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`;
+
+      res.set("Content-Type", "application/xml");
+      res.send(xml);
+    } catch (error: any) {
+      console.error("Sitemap generation error:", error);
+      res.status(500).json({ success: false, error: error.message });
+    }
+  });
+
+  // Save sitemap to repository
+  app.post("/api/sitemap/save", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      // Generate sitemap content
+      const posts = await storage.getPosts();
+      const config = await storage.getSearchConsoleConfig();
+      
+      let baseUrl = config?.siteUrl || "";
+      
+      if (!baseUrl) {
+        const vercelProject = await storage.getVercelProject();
+        if (vercelProject?.productionUrl) {
+          baseUrl = `https://${vercelProject.productionUrl}`;
+        } else {
+          const domains = await storage.getVercelDomains();
+          const verifiedDomain = domains.find(d => d.verified && d.configured);
+          if (verifiedDomain) {
+            baseUrl = `https://${verifiedDomain.name}`;
+          }
+        }
+      }
+
+      if (!baseUrl) {
+        return res.json({ 
+          success: false, 
+          error: "No base URL configured. Please set up a domain first." 
+        });
+      }
+
+      baseUrl = baseUrl.replace(/\/$/, "");
+
+      const urls: { loc: string; lastmod?: string; priority: string; changefreq: string }[] = [];
+
+      urls.push({
+        loc: baseUrl,
+        lastmod: new Date().toISOString().split("T")[0],
+        priority: "1.0",
+        changefreq: "daily",
+      });
+
+      urls.push({
+        loc: `${baseUrl}/blog`,
+        lastmod: new Date().toISOString().split("T")[0],
+        priority: "0.9",
+        changefreq: "daily",
+      });
+
+      for (const post of posts) {
+        if (!post.draft) {
+          urls.push({
+            loc: `${baseUrl}/blog/${post.slug}`,
+            lastmod: post.pubDate?.split("T")[0] || new Date().toISOString().split("T")[0],
+            priority: "0.8",
+            changefreq: "weekly",
+          });
+        }
+      }
+
+      const staticPages = await storage.getStaticPages();
+      for (const page of staticPages) {
+        const pageName = page.name.toLowerCase();
+        if (pageName !== "index" && pageName !== "404" && pageName !== "500") {
+          urls.push({
+            loc: `${baseUrl}/${pageName}`,
+            lastmod: new Date().toISOString().split("T")[0],
+            priority: "0.6",
+            changefreq: "monthly",
+          });
+        }
+      }
+
+      const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+${urls.map(url => `  <url>
+    <loc>${url.loc}</loc>
+    <lastmod>${url.lastmod}</lastmod>
+    <changefreq>${url.changefreq}</changefreq>
+    <priority>${url.priority}</priority>
+  </url>`).join("\n")}
+</urlset>`;
+
+      // Commit sitemap to repository
+      const octokit = await getGitHubClient();
+      
+      // Check if sitemap exists
+      let sha: string | undefined;
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "public/sitemap.xml",
+          ref: repo.activeBranch,
+        });
+        if (!Array.isArray(data) && "sha" in data) {
+          sha = data.sha;
+        }
+      } catch {
+        // File doesn't exist, will create new
+      }
+
+      // Create or update file
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path: "public/sitemap.xml",
+        message: "Update sitemap.xml",
+        content: Buffer.from(xml).toString("base64"),
+        branch: repo.activeBranch,
+        sha,
+      });
+
+      res.json({ success: true, message: "Sitemap saved to repository" });
+    } catch (error: any) {
+      console.error("Save sitemap error:", error);
       res.json({ success: false, error: error.message });
     }
   });

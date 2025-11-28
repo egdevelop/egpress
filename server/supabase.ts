@@ -12,6 +12,7 @@ export const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)
   : null;
 
+// Legacy user settings (for migration compatibility)
 export interface UserSettings {
   github_token_hash: string;
   github_username: string;
@@ -28,9 +29,285 @@ export interface UserSettings {
   updated_at?: string;
 }
 
+// New repository-based settings
+export interface RepositorySettings {
+  id?: number;
+  repository: string; // owner/repo format
+  github_token_hash: string;
+  github_username: string;
+  // Vercel settings
+  vercel_token?: string;
+  vercel_team_id?: string;
+  vercel_project_id?: string;
+  vercel_project_name?: string;
+  // Google Search Console settings (service account)
+  search_console_service_account?: string; // Full JSON key
+  search_console_site_url?: string;
+  // Gemini AI
+  gemini_api_key?: string;
+  // AdSense
+  adsense_publisher_id?: string;
+  adsense_slots?: Record<string, string>;
+  // Timestamps
+  created_at?: string;
+  updated_at?: string;
+}
+
 function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
+
+// ==================== REPOSITORY-BASED SETTINGS ====================
+
+export async function getRepositorySettings(repository: string): Promise<RepositorySettings | null> {
+  if (!supabase) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('repository_settings')
+      .select('*')
+      .eq('repository', repository)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return null; // Not found
+      }
+      console.error('Error loading repository settings:', error);
+      return null;
+    }
+    
+    return data as RepositorySettings;
+  } catch (err) {
+    console.error('Supabase load error:', err);
+    return null;
+  }
+}
+
+export async function saveRepositorySettings(
+  repository: string, 
+  githubToken: string, 
+  githubUsername: string,
+  settings: Partial<RepositorySettings>
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  const tokenHash = hashToken(githubToken);
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .upsert({
+        repository,
+        github_token_hash: tokenHash,
+        github_username: githubUsername,
+        ...settings,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'repository',
+      });
+    
+    if (error) {
+      console.error('Error saving repository settings:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase save error:', err);
+    return false;
+  }
+}
+
+export async function updateRepositoryVercel(
+  repository: string,
+  vercelToken: string,
+  teamId?: string,
+  projectId?: string,
+  projectName?: string
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .update({ 
+        vercel_token: vercelToken,
+        vercel_team_id: teamId || null,
+        vercel_project_id: projectId || null,
+        vercel_project_name: projectName || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('repository', repository);
+    
+    if (error) {
+      console.error('Error updating Vercel config:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function clearRepositoryVercel(repository: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .update({ 
+        vercel_token: null,
+        vercel_team_id: null,
+        vercel_project_id: null,
+        vercel_project_name: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('repository', repository);
+    
+    if (error) {
+      console.error('Error clearing Vercel config:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function updateRepositorySearchConsole(
+  repository: string,
+  serviceAccountJson: string,
+  siteUrl?: string
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .update({ 
+        search_console_service_account: serviceAccountJson,
+        search_console_site_url: siteUrl || null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('repository', repository);
+    
+    if (error) {
+      console.error('Error updating Search Console config:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function clearRepositorySearchConsole(repository: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .update({ 
+        search_console_service_account: null,
+        search_console_site_url: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('repository', repository);
+    
+    if (error) {
+      console.error('Error clearing Search Console config:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function updateRepositoryGemini(repository: string, geminiKey: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .update({ 
+        gemini_api_key: geminiKey,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('repository', repository);
+    
+    if (error) {
+      console.error('Error updating Gemini key:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function updateRepositoryAdsense(
+  repository: string,
+  publisherId: string,
+  slots: Record<string, string>
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .update({ 
+        adsense_publisher_id: publisherId,
+        adsense_slots: slots,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('repository', repository);
+    
+    if (error) {
+      console.error('Error updating AdSense config:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function deleteRepositorySettings(repository: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .delete()
+      .eq('repository', repository);
+    
+    if (error) {
+      console.error('Error deleting repository settings:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase delete error:', err);
+    return false;
+  }
+}
+
+// ==================== LEGACY USER SETTINGS (for backward compatibility) ====================
 
 export async function saveUserSettings(githubToken: string, githubUsername: string, settings: Partial<UserSettings>): Promise<boolean> {
   if (!supabase) return false;
@@ -111,6 +388,7 @@ export async function deleteUserSettings(githubToken: string): Promise<boolean> 
   }
 }
 
+// Legacy update functions (kept for backward compatibility)
 export async function updateGeminiKey(githubToken: string, geminiKey: string): Promise<boolean> {
   if (!supabase) return false;
   

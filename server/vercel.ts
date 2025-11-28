@@ -93,6 +93,90 @@ export class VercelService {
     }));
   }
 
+  /**
+   * Find a Vercel project by GitHub repository
+   * Returns the project if found, null otherwise
+   */
+  async findProjectByRepo(owner: string, repo: string): Promise<VercelProject | null> {
+    try {
+      // Query Vercel API for projects linked to this GitHub repo
+      const repoFullName = `${owner}/${repo}`;
+      const data = await this.request<{ projects: any[] }>(`/v9/projects?repoUrl=https://github.com/${repoFullName}`);
+      
+      if (data.projects && data.projects.length > 0) {
+        const p = data.projects[0];
+        return {
+          id: p.id,
+          name: p.name,
+          framework: p.framework,
+          productionUrl: p.alias?.[0]?.domain || p.targets?.production?.alias?.[0],
+          createdAt: p.createdAt ? new Date(p.createdAt).toISOString() : undefined,
+          gitRepository: {
+            type: "github",
+            repo: repoFullName,
+          },
+        };
+      }
+      
+      // Fallback: search through all projects to find matching repo
+      const allProjects = await this.listProjects(100);
+      const matchingProject = allProjects.find(p => 
+        p.gitRepository?.repo?.toLowerCase() === repoFullName.toLowerCase()
+      );
+      
+      return matchingProject || null;
+    } catch (err) {
+      console.error('Error finding project by repo:', err);
+      return null;
+    }
+  }
+
+  /**
+   * Auto-link or create a Vercel project for a GitHub repository
+   * Returns the project (existing or newly created)
+   */
+  async autoLinkProject(owner: string, repo: string): Promise<{
+    project: VercelProject;
+    isNew: boolean;
+    message: string;
+  }> {
+    // First, try to find an existing project linked to this repo
+    const existingProject = await this.findProjectByRepo(owner, repo);
+    
+    if (existingProject) {
+      return {
+        project: existingProject,
+        isNew: false,
+        message: `Found existing project "${existingProject.name}" linked to ${owner}/${repo}`,
+      };
+    }
+    
+    // No existing project found, create a new one
+    // Use repo name as project name, sanitized for Vercel
+    const projectName = repo.toLowerCase().replace(/[^a-z0-9-]/g, '-');
+    
+    try {
+      const newProject = await this.createProject(projectName, { owner, repo });
+      return {
+        project: newProject,
+        isNew: true,
+        message: `Created new project "${projectName}" and linked to ${owner}/${repo}`,
+      };
+    } catch (err: any) {
+      // If project name already exists but not linked to this repo, try with suffix
+      if (err.message?.includes('already exists')) {
+        const uniqueName = `${projectName}-${Date.now().toString(36)}`;
+        const newProject = await this.createProject(uniqueName, { owner, repo });
+        return {
+          project: newProject,
+          isNew: true,
+          message: `Created new project "${uniqueName}" and linked to ${owner}/${repo}`,
+        };
+      }
+      throw err;
+    }
+  }
+
   async getProject(projectIdOrName: string): Promise<VercelProject | null> {
     try {
       const p = await this.request<any>(`/v9/projects/${encodeURIComponent(projectIdOrName)}`);
