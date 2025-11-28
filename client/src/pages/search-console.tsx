@@ -80,9 +80,20 @@ interface SearchConsoleSite {
   permissionLevel: string;
 }
 
+interface Sitemap {
+  path: string;
+  lastSubmitted?: string;
+  isPending?: boolean;
+  isSitemapsIndex?: boolean;
+  lastDownloaded?: string;
+  warnings?: number;
+  errors?: number;
+}
+
 export default function SearchConsole() {
   const { toast } = useToast();
   const [showCredentialsDialog, setShowCredentialsDialog] = useState(false);
+  const [sitemapUrl, setSitemapUrl] = useState("");
   const [showSitesDialog, setShowSitesDialog] = useState(false);
   const [selectedUrls, setSelectedUrls] = useState<string[]>([]);
   const [customUrl, setCustomUrl] = useState("");
@@ -108,6 +119,11 @@ export default function SearchConsole() {
   const { data: statusData, isLoading: statusLoading, refetch: refetchStatus } = useQuery<{ success: boolean; data: IndexingStatus[] }>({
     queryKey: ["/api/search-console/status"],
     enabled: !!configData?.data?.hasCredentials,
+  });
+
+  const { data: sitemapsData, isLoading: sitemapsLoading, refetch: refetchSitemaps } = useQuery<{ success: boolean; data: Sitemap[] }>({
+    queryKey: ["/api/search-console/sitemaps"],
+    enabled: !!configData?.data?.hasCredentials && !!configData?.data?.siteUrl,
   });
 
   const form = useForm<CredentialsFormValues>({
@@ -156,11 +172,19 @@ export default function SearchConsole() {
       if (data.success) {
         toast({
           title: "URLs Submitted",
-          description: `${data.submitted} URL(s) submitted for indexing`,
+          description: `${data.submitted}/${data.total} URL(s) submitted to Google Indexing API`,
         });
         setSelectedUrls([]);
         setCustomUrl("");
         queryClient.invalidateQueries({ queryKey: ["/api/search-console/status"] });
+        
+        if (data.errors && data.errors.length > 0) {
+          toast({
+            title: "Some URLs Failed",
+            description: data.errors.slice(0, 3).join("; "),
+            variant: "destructive",
+          });
+        }
       } else {
         toast({
           title: "Submission Failed",
@@ -173,6 +197,36 @@ export default function SearchConsole() {
       toast({
         title: "Submission Failed",
         description: "An error occurred while submitting URLs",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const submitSitemapMutation = useMutation({
+    mutationFn: async (sitemapUrl: string) => {
+      const response = await apiRequest("POST", "/api/search-console/submit-sitemap", { sitemapUrl });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Sitemap Submitted",
+          description: data.message || "Sitemap has been submitted to Google",
+        });
+        setSitemapUrl("");
+        queryClient.invalidateQueries({ queryKey: ["/api/search-console/sitemaps"] });
+      } else {
+        toast({
+          title: "Sitemap Submission Failed",
+          description: data.error || "Failed to submit sitemap",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Sitemap Submission Failed",
+        description: "An error occurred while submitting sitemap",
         variant: "destructive",
       });
     },
@@ -224,6 +278,7 @@ export default function SearchConsole() {
   const config = configData?.data;
   const sites = sitesData?.data || [];
   const indexingStatus = statusData?.data || [];
+  const sitemaps = sitemapsData?.data || [];
 
   const getPostUrl = (post: Post) => {
     if (!config?.siteUrl) return "";
@@ -594,6 +649,10 @@ export default function SearchConsole() {
               <Globe className="w-4 h-4 mr-2" />
               Custom URL
             </TabsTrigger>
+            <TabsTrigger value="sitemap" data-testid="tab-sitemap">
+              <FileText className="w-4 h-4 mr-2" />
+              Sitemap
+            </TabsTrigger>
             <TabsTrigger value="status" data-testid="tab-status">
               <Clock className="w-4 h-4 mr-2" />
               Indexing Status
@@ -717,6 +776,112 @@ export default function SearchConsole() {
                 <p className="text-sm text-muted-foreground">
                   Use this to submit pages like your homepage, about page, or any other URL on your site.
                 </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="sitemap" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <CardTitle>Sitemap Management</CardTitle>
+                    <CardDescription>
+                      Submit and manage sitemaps for your site
+                    </CardDescription>
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => refetchSitemaps()}
+                    disabled={sitemapsLoading}
+                    data-testid="button-refresh-sitemaps"
+                  >
+                    <RefreshCw className={`w-4 h-4 mr-2 ${sitemapsLoading ? "animate-spin" : ""}`} />
+                    Refresh
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-3">
+                  <h4 className="font-medium">Submit New Sitemap</h4>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder={`${config?.siteUrl || "https://yourblog.com"}/sitemap.xml`}
+                      value={sitemapUrl}
+                      onChange={(e) => setSitemapUrl(e.target.value)}
+                      className="flex-1"
+                      data-testid="input-sitemap-url"
+                    />
+                    <Button
+                      onClick={() => submitSitemapMutation.mutate(sitemapUrl)}
+                      disabled={!sitemapUrl.trim() || submitSitemapMutation.isPending}
+                      data-testid="button-submit-sitemap"
+                    >
+                      {submitSitemapMutation.isPending ? (
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4 mr-2" />
+                      )}
+                      Submit Sitemap
+                    </Button>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Submit your sitemap.xml to Google for faster crawling and indexing
+                  </p>
+                </div>
+
+                <div className="border-t pt-4">
+                  <h4 className="font-medium mb-3">Submitted Sitemaps</h4>
+                  {sitemapsLoading ? (
+                    <div className="space-y-2">
+                      {[1, 2].map(i => (
+                        <Skeleton key={i} className="h-12 w-full" />
+                      ))}
+                    </div>
+                  ) : sitemaps.length > 0 ? (
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Sitemap URL</TableHead>
+                          <TableHead className="w-32">Status</TableHead>
+                          <TableHead className="w-40">Last Submitted</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {sitemaps.map((sm, index) => (
+                          <TableRow key={index} data-testid={`row-sitemap-${index}`}>
+                            <TableCell className="font-medium text-sm truncate max-w-xs">
+                              <a href={sm.path} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 hover:underline">
+                                {sm.path}
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </TableCell>
+                            <TableCell>
+                              {sm.isPending ? (
+                                <Badge className="bg-amber-500/10 text-amber-600 border-amber-200">Pending</Badge>
+                              ) : sm.errors && sm.errors > 0 ? (
+                                <Badge variant="destructive">{sm.errors} errors</Badge>
+                              ) : sm.warnings && sm.warnings > 0 ? (
+                                <Badge className="bg-amber-500/10 text-amber-600 border-amber-200">{sm.warnings} warnings</Badge>
+                              ) : (
+                                <Badge className="bg-green-500/10 text-green-600 border-green-200">OK</Badge>
+                              )}
+                            </TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              {sm.lastSubmitted ? new Date(sm.lastSubmitted).toLocaleDateString() : "N/A"}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <FileText className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                      <p>No sitemaps submitted yet</p>
+                    </div>
+                  )}
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

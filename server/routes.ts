@@ -1652,7 +1652,7 @@ export async function registerRoutes(
     }
   });
 
-  // Submit URLs for indexing
+  // Submit URLs for indexing using Google Indexing API
   app.post("/api/search-console/submit", async (req, res) => {
     try {
       const config = await storage.getSearchConsoleConfig();
@@ -1660,17 +1660,29 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Search Console not configured" });
       }
 
+      if (!config.siteUrl) {
+        return res.json({ success: false, error: "No site selected. Please select a site first." });
+      }
+
       const { urls } = req.body;
       if (!urls || !Array.isArray(urls) || urls.length === 0) {
         return res.json({ success: false, error: "URLs are required" });
       }
 
+      // Parse service account JSON
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(config.serviceAccountJson);
+      } catch {
+        return res.json({ success: false, error: "Invalid service account JSON" });
+      }
+
       // Validate URLs - must be strings starting with http(s)
       const validUrls: string[] = [];
+      const siteHost = new URL(config.siteUrl).hostname;
+      
       for (const url of urls) {
         if (typeof url === "string" && (url.startsWith("http://") || url.startsWith("https://"))) {
-          // Validate URL belongs to configured site
-          const siteHost = new URL(config.siteUrl).hostname;
           try {
             const urlHost = new URL(url).hostname;
             if (urlHost === siteHost || urlHost.endsWith(`.${siteHost}`)) {
@@ -1686,38 +1698,231 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No valid URLs provided. URLs must belong to your configured site." });
       }
 
-      // For each URL, update status to submitted
-      // Note: In production, you would make actual API calls to Google Indexing API
-      // This simplified version simulates the submission process
+      // Setup Google Indexing API with service account
+      const { google } = await import("googleapis");
+      const auth = new google.auth.JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key,
+        scopes: ["https://www.googleapis.com/auth/indexing"],
+      });
+
+      const indexing = google.indexing({ version: "v3", auth });
+
       let submitted = 0;
       const errors: string[] = [];
+      const results: { url: string; status: string; message: string }[] = [];
 
+      // Submit each URL to Google Indexing API
       for (const url of validUrls) {
         try {
+          const response = await indexing.urlNotifications.publish({
+            requestBody: {
+              url: url,
+              type: "URL_UPDATED",
+            },
+          });
+
           await storage.updateIndexingStatus(url, {
             status: "submitted",
             lastSubmitted: new Date().toISOString(),
-            message: "URL submitted to Google Indexing API",
+            message: `Submitted successfully. Notification time: ${response.data.urlNotificationMetadata?.latestUpdate?.notifyTime || 'N/A'}`,
           });
+          
+          results.push({ url, status: "success", message: "Submitted to Google Indexing API" });
           submitted++;
         } catch (error: any) {
-          errors.push(`${url}: ${error.message}`);
+          const errorMessage = error.response?.data?.error?.message || error.message || "Failed to submit";
+          errors.push(`${url}: ${errorMessage}`);
+          
           await storage.updateIndexingStatus(url, {
             status: "error",
             lastSubmitted: new Date().toISOString(),
-            message: error.message || "Failed to submit",
+            message: errorMessage,
           });
+          
+          results.push({ url, status: "error", message: errorMessage });
         }
       }
 
       res.json({
         success: true,
         submitted,
+        total: validUrls.length,
         errors: errors.length > 0 ? errors : undefined,
+        results,
       });
     } catch (error: any) {
       console.error("Submit URLs error:", error);
       res.json({ success: false, error: error.message || "Failed to submit URLs" });
+    }
+  });
+
+  // Submit sitemap to Google Search Console
+  app.post("/api/search-console/submit-sitemap", async (req, res) => {
+    try {
+      const config = await storage.getSearchConsoleConfig();
+      if (!config || !config.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console not configured" });
+      }
+
+      if (!config.siteUrl) {
+        return res.json({ success: false, error: "No site selected. Please select a site first." });
+      }
+
+      const { sitemapUrl } = req.body;
+      if (!sitemapUrl) {
+        return res.json({ success: false, error: "Sitemap URL is required" });
+      }
+
+      // Parse service account JSON
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(config.serviceAccountJson);
+      } catch {
+        return res.json({ success: false, error: "Invalid service account JSON" });
+      }
+
+      // Setup Google Search Console API
+      const { google } = await import("googleapis");
+      const auth = new google.auth.JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key,
+        scopes: ["https://www.googleapis.com/auth/webmasters"],
+      });
+
+      const searchconsole = google.searchconsole({ version: "v1", auth });
+
+      try {
+        // Submit sitemap using webmasters API (v3)
+        const webmasters = google.webmasters({ version: "v3", auth });
+        await webmasters.sitemaps.submit({
+          siteUrl: config.siteUrl,
+          feedpath: sitemapUrl,
+        });
+
+        res.json({ 
+          success: true, 
+          message: `Sitemap ${sitemapUrl} submitted successfully to ${config.siteUrl}` 
+        });
+      } catch (apiError: any) {
+        console.error("Sitemap submission error:", apiError);
+        const errorMessage = apiError.response?.data?.error?.message || apiError.message || "Failed to submit sitemap";
+        res.json({ success: false, error: errorMessage });
+      }
+    } catch (error: any) {
+      console.error("Submit sitemap error:", error);
+      res.json({ success: false, error: error.message || "Failed to submit sitemap" });
+    }
+  });
+
+  // Get sitemaps from Google Search Console
+  app.get("/api/search-console/sitemaps", async (req, res) => {
+    try {
+      const config = await storage.getSearchConsoleConfig();
+      if (!config || !config.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console not configured" });
+      }
+
+      if (!config.siteUrl) {
+        return res.json({ success: false, error: "No site selected" });
+      }
+
+      // Parse service account JSON
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(config.serviceAccountJson);
+      } catch {
+        return res.json({ success: false, error: "Invalid service account JSON" });
+      }
+
+      const { google } = await import("googleapis");
+      const auth = new google.auth.JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key,
+        scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+      });
+
+      const webmasters = google.webmasters({ version: "v3", auth });
+      
+      try {
+        const response = await webmasters.sitemaps.list({
+          siteUrl: config.siteUrl,
+        });
+
+        const sitemaps = (response.data.sitemap || []).map((sm: any) => ({
+          path: sm.path,
+          lastSubmitted: sm.lastSubmitted,
+          isPending: sm.isPending,
+          isSitemapsIndex: sm.isSitemapsIndex,
+          lastDownloaded: sm.lastDownloaded,
+          warnings: sm.warnings,
+          errors: sm.errors,
+        }));
+
+        res.json({ success: true, data: sitemaps });
+      } catch (apiError: any) {
+        console.error("Get sitemaps error:", apiError);
+        res.json({ success: false, error: apiError.message || "Failed to get sitemaps" });
+      }
+    } catch (error: any) {
+      console.error("Get sitemaps error:", error);
+      res.json({ success: false, error: error.message || "Failed to get sitemaps" });
+    }
+  });
+
+  // Get URL inspection data
+  app.post("/api/search-console/inspect-url", async (req, res) => {
+    try {
+      const config = await storage.getSearchConsoleConfig();
+      if (!config || !config.serviceAccountJson) {
+        return res.json({ success: false, error: "Search Console not configured" });
+      }
+
+      if (!config.siteUrl) {
+        return res.json({ success: false, error: "No site selected" });
+      }
+
+      const { inspectionUrl } = req.body;
+      if (!inspectionUrl) {
+        return res.json({ success: false, error: "URL is required" });
+      }
+
+      // Parse service account JSON
+      let serviceAccount;
+      try {
+        serviceAccount = JSON.parse(config.serviceAccountJson);
+      } catch {
+        return res.json({ success: false, error: "Invalid service account JSON" });
+      }
+
+      const { google } = await import("googleapis");
+      const auth = new google.auth.JWT({
+        email: serviceAccount.client_email,
+        key: serviceAccount.private_key,
+        scopes: ["https://www.googleapis.com/auth/webmasters.readonly"],
+      });
+
+      const searchconsole = google.searchconsole({ version: "v1", auth });
+      
+      try {
+        const response = await searchconsole.urlInspection.index.inspect({
+          requestBody: {
+            inspectionUrl: inspectionUrl,
+            siteUrl: config.siteUrl,
+          },
+        });
+
+        res.json({ 
+          success: true, 
+          data: response.data.inspectionResult 
+        });
+      } catch (apiError: any) {
+        console.error("URL inspection error:", apiError);
+        res.json({ success: false, error: apiError.message || "Failed to inspect URL" });
+      }
+    } catch (error: any) {
+      console.error("Inspect URL error:", error);
+      res.json({ success: false, error: error.message || "Failed to inspect URL" });
     }
   });
 
