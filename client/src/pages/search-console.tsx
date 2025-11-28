@@ -58,7 +58,6 @@ import { useToast } from "@/hooks/use-toast";
 import type { Repository, Post } from "@shared/schema";
 
 const credentialsSchema = z.object({
-  siteUrl: z.string().min(1, "Site URL is required").url("Must be a valid URL"),
   serviceAccountJson: z.string().min(1, "Service account JSON is required"),
 });
 
@@ -101,7 +100,7 @@ export default function SearchConsole() {
     queryKey: ["/api/search-console/config"],
   });
 
-  const { data: sitesData, isLoading: sitesLoading, refetch: refetchSites } = useQuery<{ success: boolean; data: SearchConsoleSite[] }>({
+  const { data: sitesData, isLoading: sitesLoading, isError: sitesError, refetch: refetchSites } = useQuery<{ success: boolean; data: SearchConsoleSite[] }>({
     queryKey: ["/api/search-console/sites"],
     enabled: !!configData?.data?.hasCredentials,
   });
@@ -114,16 +113,9 @@ export default function SearchConsole() {
   const form = useForm<CredentialsFormValues>({
     resolver: zodResolver(credentialsSchema),
     defaultValues: {
-      siteUrl: "",
       serviceAccountJson: "",
     },
   });
-
-  useEffect(() => {
-    if (configData?.data?.siteUrl) {
-      form.setValue("siteUrl", configData.data.siteUrl);
-    }
-  }, [configData, form]);
 
   const saveCredentialsMutation = useMutation({
     mutationFn: async (data: CredentialsFormValues) => {
@@ -337,27 +329,6 @@ export default function SearchConsole() {
               <form onSubmit={form.handleSubmit((data) => saveCredentialsMutation.mutate(data))} className="space-y-4">
                 <FormField
                   control={form.control}
-                  name="siteUrl"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Site URL</FormLabel>
-                      <FormControl>
-                        <Input
-                          placeholder="https://yourblog.com"
-                          {...field}
-                          data-testid="input-site-url"
-                        />
-                      </FormControl>
-                      <FormDescription>
-                        Your verified site URL in Google Search Console
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-
-                <FormField
-                  control={form.control}
                   name="serviceAccountJson"
                   render={({ field }) => (
                     <FormItem>
@@ -481,7 +452,33 @@ export default function SearchConsole() {
             </Card>
           )}
 
-          {!config.siteUrl && !sitesLoading && sites.length === 0 && (
+          {!config.siteUrl && !sitesLoading && sitesError && (
+            <Card className="border-red-200 bg-red-50/50">
+              <CardContent className="py-6">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-5 h-5 text-red-600 mt-0.5" />
+                  <div>
+                    <p className="font-medium text-red-800">Failed to Load Sites</p>
+                    <p className="text-sm text-red-700 mt-1">
+                      There was an error loading sites from Google Search Console. Check that your service account credentials are valid.
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => refetchSites()}
+                      data-testid="button-retry-sites"
+                    >
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Retry
+                    </Button>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {!config.siteUrl && !sitesLoading && !sitesError && sites.length === 0 && (
             <Card className="border-amber-200 bg-amber-50/50">
               <CardContent className="py-6">
                 <div className="flex items-start gap-3">
@@ -496,6 +493,7 @@ export default function SearchConsole() {
                       size="sm"
                       className="mt-3"
                       onClick={() => refetchSites()}
+                      data-testid="button-refresh-sites"
                     >
                       <RefreshCw className="w-4 h-4 mr-2" />
                       Retry

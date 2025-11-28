@@ -1582,10 +1582,10 @@ export async function registerRoutes(
   // Save Search Console credentials (protected)
   app.post("/api/search-console/credentials", requireAuth, async (req, res) => {
     try {
-      const { siteUrl, serviceAccountJson } = req.body;
+      const { serviceAccountJson } = req.body;
 
-      if (!siteUrl || !serviceAccountJson) {
-        return res.json({ success: false, error: "Site URL and service account JSON are required" });
+      if (!serviceAccountJson) {
+        return res.json({ success: false, error: "Service account JSON is required" });
       }
 
       // Validate JSON format
@@ -1600,7 +1600,7 @@ export async function registerRoutes(
       }
 
       await storage.setSearchConsoleConfig({
-        siteUrl,
+        siteUrl: "",
         serviceAccountJson,
         clientEmail: parsed.client_email,
         privateKey: parsed.private_key,
@@ -1611,7 +1611,7 @@ export async function registerRoutes(
         req.session.githubToken!,
         parsed.client_email,
         parsed.private_key,
-        siteUrl
+        ""
       );
       if (!supabaseResult) {
         console.warn("Failed to persist Search Console config to Supabase");
