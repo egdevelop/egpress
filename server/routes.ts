@@ -1,12 +1,29 @@
-import type { Express } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { generateBlogPost } from "./gemini";
+import { saveUserSettings, loadUserSettings, updateGeminiKey, updateVercelConfig, updateSearchConsoleConfig, updateAdsenseConfig, clearVercelConfig, clearSearchConsoleConfig } from "./supabase";
 import matter from "gray-matter";
 import yaml from "yaml";
+import { Octokit } from "@octokit/rest";
 import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
 import { siteConfigSchema, adsenseConfigSchema } from "@shared/schema";
+
+declare module "express-session" {
+  interface SessionData {
+    githubToken?: string;
+    githubUsername?: string;
+  }
+}
+
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  if (!req.session.githubToken) {
+    return res.status(401).json({ success: false, error: "Authentication required" });
+  }
+  setManualGitHubToken(req.session.githubToken);
+  next();
+}
 
 // Default configurations
 const defaultSiteConfig: SiteConfig = {
@@ -234,8 +251,112 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
   
+  // ============== AUTHENTICATION ROUTES ==============
+
+  // Check auth status
+  app.get("/api/auth/status", async (req, res) => {
+    try {
+      if (req.session.githubToken && req.session.githubUsername) {
+        res.json({ 
+          success: true, 
+          data: { 
+            authenticated: true, 
+            username: req.session.githubUsername 
+          } 
+        });
+      } else {
+        res.json({ success: true, data: { authenticated: false } });
+      }
+    } catch (error) {
+      res.json({ success: true, data: { authenticated: false } });
+    }
+  });
+
+  // Login with GitHub token
+  app.post("/api/auth/login", async (req, res) => {
+    try {
+      const { token } = req.body;
+      
+      if (!token) {
+        return res.json({ success: false, error: "GitHub token is required" });
+      }
+
+      // Validate the token by getting user info
+      const octokit = new Octokit({ auth: token });
+      
+      try {
+        const { data: user } = await octokit.users.getAuthenticated();
+        
+        // Store in session
+        req.session.githubToken = token;
+        req.session.githubUsername = user.login;
+        
+        // Set as manual token for GitHub operations
+        setManualGitHubToken(token);
+        
+        // Load saved settings from Supabase
+        const savedSettings = await loadUserSettings(token);
+        
+        // If there are saved settings, restore them to storage
+        if (savedSettings) {
+          if (savedSettings.gemini_api_key) {
+            await storage.setGeminiApiKey(savedSettings.gemini_api_key);
+          }
+          if (savedSettings.vercel_token) {
+            await storage.setVercelConfig({
+              token: savedSettings.vercel_token,
+              teamId: savedSettings.vercel_team_id,
+              username: user.login,
+            });
+          }
+          if (savedSettings.search_console_client_email && savedSettings.search_console_private_key) {
+            await storage.setSearchConsoleConfig({
+              clientEmail: savedSettings.search_console_client_email,
+              privateKey: savedSettings.search_console_private_key,
+              siteUrl: savedSettings.search_console_site_url || "",
+            });
+          }
+        } else {
+          // Create initial settings record
+          await saveUserSettings(token, user.login, {});
+        }
+        
+        res.json({ 
+          success: true, 
+          data: { 
+            username: user.login, 
+            name: user.name,
+            avatar_url: user.avatar_url 
+          } 
+        });
+      } catch (authError: any) {
+        res.json({ success: false, error: "Invalid GitHub token. Please check your Personal Access Token." });
+      }
+    } catch (error: any) {
+      res.json({ success: false, error: error.message || "Authentication failed" });
+    }
+  });
+
+  // Logout
+  app.post("/api/auth/logout", async (req, res) => {
+    try {
+      clearManualToken();
+      await storage.clearRepository();
+      req.session.destroy((err) => {
+        if (err) {
+          console.error("Session destroy error:", err);
+        }
+        res.json({ success: true });
+      });
+    } catch (error) {
+      res.json({ success: false, error: "Logout failed" });
+    }
+  });
+
+  // ============== GITHUB ROUTES ==============
+
   // Check GitHub connection status
-  app.get("/api/github/status", async (req, res) => {
+  app.get("/api/github/status", requireAuth, async (req, res) => {
     try {
       const info = await getGitHubConnectionInfo();
       res.json({ success: true, data: info });

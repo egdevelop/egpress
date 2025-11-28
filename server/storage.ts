@@ -3,7 +3,9 @@ import { randomUUID } from "crypto";
 
 export interface SearchConsoleConfig {
   siteUrl: string;
-  serviceAccountJson: string;
+  serviceAccountJson?: string;
+  clientEmail?: string;
+  privateKey?: string;
 }
 
 export interface IndexingStatus {
@@ -70,6 +72,10 @@ export interface IStorage {
   setVercelDeployments(deployments: VercelDeployment[]): Promise<void>;
   getVercelDomains(): Promise<VercelDomain[]>;
   setVercelDomains(domains: VercelDomain[]): Promise<void>;
+
+  // Gemini
+  getGeminiApiKey(): Promise<string | null>;
+  setGeminiApiKey(key: string | null): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -88,6 +94,7 @@ export class MemStorage implements IStorage {
   private vercelProject: VercelProject | null = null;
   private vercelDeployments: VercelDeployment[] = [];
   private vercelDomains: VercelDomain[] = [];
+  private geminiApiKey: string | null = null;
 
   async getRepository(): Promise<Repository | null> {
     return this.repository;
@@ -263,6 +270,14 @@ export class MemStorage implements IStorage {
 
   async setVercelDomains(domains: VercelDomain[]): Promise<void> {
     this.vercelDomains = domains;
+  }
+
+  async getGeminiApiKey(): Promise<string | null> {
+    return this.geminiApiKey;
+  }
+
+  async setGeminiApiKey(key: string | null): Promise<void> {
+    this.geminiApiKey = key;
   }
 }
 

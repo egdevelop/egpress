@@ -52,3 +52,9 @@ waitForPort = 5000
 
 [agent]
 integrations = ["github:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+SUPABASE_URL = "https://cscrysbtfijbsilsclng.supabase.co"
+SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNzY3J5c2J0ZmlqYnNpbHNjbG5nIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjQzNDk1MjcsImV4cCI6MjA3OTkyNTUyN30.PHvbdwBDpTSsXQtQKxP30go2QNUFdcY9e_KQqLIZfFw"
