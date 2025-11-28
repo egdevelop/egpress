@@ -17,7 +17,9 @@ import {
   LogOut,
   User,
   ChevronsUpDown,
-  Lock
+  Lock,
+  Unplug,
+  ArrowRightLeft
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -48,6 +50,16 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -146,6 +158,9 @@ const systemItems = [
 export function AppSidebar() {
   const [location] = useLocation();
   const [repoSelectOpen, setRepoSelectOpen] = useState(false);
+  const [repoManageOpen, setRepoManageOpen] = useState(false);
+  const [showChangeRepo, setShowChangeRepo] = useState(false);
+  const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const { toast } = useToast();
   const { githubUsername, logout } = useAuth();
@@ -217,8 +232,37 @@ export function AppSidebar() {
     },
   });
 
+  const disconnectMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/repository/disconnect");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Repository Disconnected",
+          description: "You can now connect a different repository",
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/repository"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/files"] });
+        setDisconnectDialogOpen(false);
+        setRepoManageOpen(false);
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Disconnect Failed",
+        description: "Failed to disconnect repository",
+        variant: "destructive",
+      });
+    },
+  });
+
   const handleSelectRepo = (fullName: string) => {
     connectMutation.mutate(fullName);
+    setShowChangeRepo(false);
+    setRepoManageOpen(false);
   };
 
   return (
