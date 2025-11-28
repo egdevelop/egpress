@@ -168,7 +168,7 @@ export function AppSidebar() {
       <SidebarHeader className="p-4 border-b border-sidebar-border">
         <div className="flex items-center gap-2 mb-4">
           <div className="w-8 h-8 rounded-md bg-primary flex items-center justify-center">
-            <span className="text-primary-foreground font-bold text-sm">A</span>
+            <span className="text-primary-foreground font-bold text-sm">EG</span>
           </div>
           <div>
             <h1 className="font-semibold text-sm">EG Press</h1>
