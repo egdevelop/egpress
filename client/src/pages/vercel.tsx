@@ -337,7 +337,9 @@ export default function VercelPage() {
   };
 
   const getDomainStatusBadge = (domain: VercelDomain) => {
-    if (domain.verified && domain.configured) {
+    const hasVerificationChallenges = domain.verification && domain.verification.length > 0;
+    
+    if (domain.verified && domain.configured && !hasVerificationChallenges) {
       return (
         <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
           <CheckCircle2 className="w-3 h-3 mr-1" />
@@ -345,15 +347,17 @@ export default function VercelPage() {
         </Badge>
       );
     }
-    if (domain.verified && !domain.configured) {
+    
+    if (hasVerificationChallenges) {
       return (
-        <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/20">
+        <Badge className="bg-red-500/10 text-red-500 border-red-500/20">
           <AlertTriangle className="w-3 h-3 mr-1" />
-          Pending DNS Configuration
+          Invalid Configuration
         </Badge>
       );
     }
-    if (!domain.verified && domain.verification && domain.verification.length > 0) {
+    
+    if (!domain.verified) {
       return (
         <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/20">
           <Clock className="w-3 h-3 mr-1" />
@@ -361,10 +365,11 @@ export default function VercelPage() {
         </Badge>
       );
     }
+    
     return (
-      <Badge className="bg-red-500/10 text-red-500 border-red-500/20">
-        <AlertTriangle className="w-3 h-3 mr-1" />
-        Invalid Configuration
+      <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+        <CheckCircle2 className="w-3 h-3 mr-1" />
+        Valid Configuration
       </Badge>
     );
   };

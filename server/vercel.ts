@@ -212,15 +212,19 @@ export class VercelService {
       `/v9/projects/${encodeURIComponent(projectId)}/domains`
     );
 
+    console.log('[Vercel API] getDomains raw response:', JSON.stringify(data.domains, null, 2));
+
     return (data.domains || []).map((d: any) => {
       const dnsRecords: { type: string; name: string; value: string }[] = [];
       
-      if (d.verification && Array.isArray(d.verification)) {
+      const hasVerificationChallenges = d.verification && Array.isArray(d.verification) && d.verification.length > 0;
+      
+      if (hasVerificationChallenges) {
         for (const v of d.verification) {
           if (v.type && v.value) {
             dnsRecords.push({
               type: v.type,
-              name: v.domain || d.name,
+              name: v.domain || "@",
               value: v.value,
             });
           }
@@ -237,20 +241,14 @@ export class VercelService {
         }
       }
       
-      if (d.apexName && !dnsRecords.find(r => r.type === "A")) {
-        dnsRecords.push({
-          type: "A",
-          name: "@",
-          value: "76.76.21.21",
-        });
-      }
-      
       const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
+      
+      const isConfigured = hasVerificationChallenges ? false : (d.verified === true);
 
       return {
         name: d.name,
         verified: d.verified || false,
-        configured: d.configured !== undefined ? d.configured : !d.misconfigured,
+        configured: isConfigured,
         createdAt: d.createdAt,
         verification: d.verification?.map((v: any) => ({
           type: v.type,
