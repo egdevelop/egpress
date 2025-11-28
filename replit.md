@@ -137,8 +137,10 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 - `GET /api/github/repos` - List user's GitHub repositories (paginated)
 
 ### GitHub
-- `GET /api/github/status` - Check GitHub connection
+- `GET /api/github/status` - Check GitHub connection and source
 - `GET /api/github/user` - Get authenticated user
+- `POST /api/github/token` - Set manual GitHub Personal Access Token
+- `POST /api/github/token/clear` - Clear manual token
 
 ## Design System
 
@@ -152,7 +154,16 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 The application runs on port 5000 with:
 - Express backend serving API endpoints
 - Vite dev server for frontend hot-reload
-- GitHub OAuth via Replit integration
+
+### GitHub Authentication Options
+
+The CMS supports multiple GitHub authentication methods (in priority order):
+
+1. **Environment Variable** - Set `GITHUB_TOKEN` in your environment for persistent authentication
+2. **Manual Token** - Enter a Personal Access Token in Settings (stored in memory, resets on restart)
+3. **Replit Integration** - Uses Replit's GitHub connector if available
+
+For self-hosting, create a GitHub Personal Access Token at https://github.com/settings/tokens/new with `repo` scope.
 
 ## User Preferences
 
