@@ -908,18 +908,16 @@ export default function VercelPage() {
                                       </div>
                                       <div className="flex items-center gap-2 mt-1">
                                         {getDomainStatusBadge(domain)}
-                                        {!domain.verified && (
-                                          <CollapsibleTrigger asChild>
-                                            <Button variant="ghost" size="sm" className="h-auto p-0 text-xs text-primary">
-                                              Learn more
-                                              {expandedDomains.has(domain.name) ? (
-                                                <ChevronUp className="w-3 h-3 ml-1" />
-                                              ) : (
-                                                <ChevronDown className="w-3 h-3 ml-1" />
-                                              )}
-                                            </Button>
-                                          </CollapsibleTrigger>
-                                        )}
+                                        <CollapsibleTrigger asChild>
+                                          <Button variant="ghost" size="sm" className="h-auto p-0 text-xs text-primary">
+                                            {!domain.configured ? "Configure DNS" : "View Details"}
+                                            {expandedDomains.has(domain.name) ? (
+                                              <ChevronUp className="w-3 h-3 ml-1" />
+                                            ) : (
+                                              <ChevronDown className="w-3 h-3 ml-1" />
+                                            )}
+                                          </Button>
+                                        </CollapsibleTrigger>
                                       </div>
                                     </div>
                                   </div>
@@ -961,9 +959,17 @@ export default function VercelPage() {
                                       </TabsList>
                                       <TabsContent value="dns">
                                         <div className="space-y-4">
-                                          <p className="text-sm text-muted-foreground">
-                                            Configure these DNS records at your domain registrar to connect your domain to Vercel.
-                                          </p>
+                                          {!domain.configured && (
+                                            <div className="flex items-start gap-3 p-4 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                                              <AlertTriangle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+                                              <div>
+                                                <p className="font-medium text-amber-600 dark:text-amber-400">DNS Configuration Required</p>
+                                                <p className="text-sm text-muted-foreground mt-1">
+                                                  Add these DNS records at your domain registrar (Cloudflare, Namecheap, etc.) to connect your domain to Vercel.
+                                                </p>
+                                              </div>
+                                            </div>
+                                          )}
                                           <div className="border rounded-lg overflow-hidden">
                                             <table className="w-full text-sm">
                                               <thead className="bg-muted/50">
@@ -971,11 +977,12 @@ export default function VercelPage() {
                                                   <th className="text-left p-3 font-medium">Type</th>
                                                   <th className="text-left p-3 font-medium">Name</th>
                                                   <th className="text-left p-3 font-medium">Value</th>
+                                                  <th className="text-left p-3 font-medium">Status</th>
                                                 </tr>
                                               </thead>
                                               <tbody>
                                                 {domain.dnsRecords && domain.dnsRecords.length > 0 ? (
-                                                  domain.dnsRecords.map((record, idx) => (
+                                                  domain.dnsRecords.map((record: any, idx: number) => (
                                                     <tr key={idx} className="border-t">
                                                       <td className="p-3">
                                                         <Badge variant="outline" className="text-xs font-mono">
@@ -1002,7 +1009,7 @@ export default function VercelPage() {
                                                       </td>
                                                       <td className="p-3">
                                                         <div className="flex items-center gap-2">
-                                                          <code className="bg-muted px-2 py-1 rounded text-xs">{record.value}</code>
+                                                          <code className="bg-muted px-2 py-1 rounded text-xs max-w-[200px] truncate">{record.value}</code>
                                                           <Tooltip>
                                                             <TooltipTrigger asChild>
                                                               <Button
@@ -1018,11 +1025,24 @@ export default function VercelPage() {
                                                           </Tooltip>
                                                         </div>
                                                       </td>
+                                                      <td className="p-3">
+                                                        {record.status === "configured" ? (
+                                                          <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
+                                                            <CheckCircle2 className="w-3 h-3 mr-1" />
+                                                            Valid
+                                                          </Badge>
+                                                        ) : (
+                                                          <Badge className="bg-amber-500/10 text-amber-500 border-amber-500/20">
+                                                            <Clock className="w-3 h-3 mr-1" />
+                                                            Pending
+                                                          </Badge>
+                                                        )}
+                                                      </td>
                                                     </tr>
                                                   ))
                                                 ) : (
                                                   <tr className="border-t">
-                                                    <td colSpan={3} className="p-4 text-center text-muted-foreground">
+                                                    <td colSpan={4} className="p-4 text-center text-muted-foreground">
                                                       No DNS records available. Click Refresh to update domain status.
                                                     </td>
                                                   </tr>

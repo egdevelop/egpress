@@ -241,16 +241,18 @@ export class VercelService {
       (data.domains || []).map(async (d: any) => {
         const config = await this.getDomainConfig(d.name);
         
-        const dnsRecords: { type: string; name: string; value: string }[] = [];
+        const dnsRecords: { type: string; name: string; value: string; status: "configured" | "pending" | "error" }[] = [];
         
         if (config) {
           const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
           if (preferredIPv4 && preferredIPv4.value.length > 0) {
             for (const ip of preferredIPv4.value) {
+              const isConfigured = config.aRecords.some(a => a.value === ip);
               dnsRecords.push({
                 type: "A",
                 name: "@",
                 value: ip,
+                status: isConfigured ? "configured" : "pending",
               });
             }
           }
@@ -259,10 +261,12 @@ export class VercelService {
           if (preferredCNAME) {
             const parts = d.name.split(".");
             const isApex = parts.length === 2;
+            const cnameConfigured = config.cnameRecord?.value === preferredCNAME.value;
             dnsRecords.push({
               type: "CNAME",
               name: isApex ? "www" : parts[0],
               value: preferredCNAME.value,
+              status: cnameConfigured ? "configured" : "pending",
             });
           }
         }
@@ -274,6 +278,7 @@ export class VercelService {
                 type: "TXT",
                 name: v.domain || "_vercel",
                 value: v.value,
+                status: d.verified ? "configured" : "pending",
               });
             }
           }
@@ -325,16 +330,18 @@ export class VercelService {
     );
 
     const config = await this.getDomainConfig(domain);
-    const dnsRecords: { type: string; name: string; value: string }[] = [];
+    const dnsRecords: { type: string; name: string; value: string; status: "configured" | "pending" | "error" }[] = [];
     
     if (config) {
       const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
       if (preferredIPv4 && preferredIPv4.value.length > 0) {
         for (const ip of preferredIPv4.value) {
+          const isConfigured = config.aRecords.some(a => a.value === ip);
           dnsRecords.push({
             type: "A",
             name: "@",
             value: ip,
+            status: isConfigured ? "configured" : "pending",
           });
         }
       }
@@ -343,10 +350,12 @@ export class VercelService {
       if (preferredCNAME) {
         const parts = domain.split(".");
         const isApex = parts.length === 2;
+        const cnameConfigured = config.cnameRecord?.value === preferredCNAME.value;
         dnsRecords.push({
           type: "CNAME",
           name: isApex ? "www" : parts[0],
           value: preferredCNAME.value,
+          status: cnameConfigured ? "configured" : "pending",
         });
       }
     }
@@ -358,6 +367,7 @@ export class VercelService {
             type: "TXT",
             name: v.domain || "_vercel",
             value: v.value,
+            status: d.verified ? "configured" : "pending",
           });
         }
       }
@@ -401,16 +411,18 @@ export class VercelService {
     );
 
     const config = await this.getDomainConfig(domain);
-    const dnsRecords: { type: string; name: string; value: string }[] = [];
+    const dnsRecords: { type: string; name: string; value: string; status: "configured" | "pending" | "error" }[] = [];
     
     if (config) {
       const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
       if (preferredIPv4 && preferredIPv4.value.length > 0) {
         for (const ip of preferredIPv4.value) {
+          const isConfigured = config.aRecords.some(a => a.value === ip);
           dnsRecords.push({
             type: "A",
             name: "@",
             value: ip,
+            status: isConfigured ? "configured" : "pending",
           });
         }
       }
@@ -419,10 +431,12 @@ export class VercelService {
       if (preferredCNAME) {
         const parts = domain.split(".");
         const isApex = parts.length === 2;
+        const cnameConfigured = config.cnameRecord?.value === preferredCNAME.value;
         dnsRecords.push({
           type: "CNAME",
           name: isApex ? "www" : parts[0],
           value: preferredCNAME.value,
+          status: cnameConfigured ? "configured" : "pending",
         });
       }
     }
@@ -434,6 +448,7 @@ export class VercelService {
             type: "TXT",
             name: v.domain || "_vercel",
             value: v.value,
+            status: d.verified ? "configured" : "pending",
           });
         }
       }
