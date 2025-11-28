@@ -244,15 +244,27 @@ export class VercelService {
         const dnsRecords: { type: string; name: string; value: string; status: "configured" | "pending" | "error" }[] = [];
         
         if (config) {
+          // Use actual configured A records if they exist
+          if (config.aRecords && config.aRecords.length > 0) {
+            for (const aRecord of config.aRecords) {
+              dnsRecords.push({
+                type: "A",
+                name: "@",
+                value: aRecord.value,
+                status: "configured",
+              });
+            }
+          }
+          
+          // If no A records configured yet, show what to configure
           const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-          if (preferredIPv4 && preferredIPv4.value.length > 0) {
+          if ((!config.aRecords || config.aRecords.length === 0) && preferredIPv4 && preferredIPv4.value.length > 0) {
             for (const ip of preferredIPv4.value) {
-              const isConfigured = config.aRecords.some(a => a.value === ip);
               dnsRecords.push({
                 type: "A",
                 name: "@",
                 value: ip,
-                status: isConfigured ? "configured" : "pending",
+                status: "pending",
               });
             }
           }
@@ -333,15 +345,27 @@ export class VercelService {
     const dnsRecords: { type: string; name: string; value: string; status: "configured" | "pending" | "error" }[] = [];
     
     if (config) {
+      // Use actual configured A records if they exist
+      if (config.aRecords && config.aRecords.length > 0) {
+        for (const aRecord of config.aRecords) {
+          dnsRecords.push({
+            type: "A",
+            name: "@",
+            value: aRecord.value,
+            status: "configured",
+          });
+        }
+      }
+      
+      // If no A records configured yet, show what to configure
       const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-      if (preferredIPv4 && preferredIPv4.value.length > 0) {
+      if ((!config.aRecords || config.aRecords.length === 0) && preferredIPv4 && preferredIPv4.value.length > 0) {
         for (const ip of preferredIPv4.value) {
-          const isConfigured = config.aRecords.some(a => a.value === ip);
           dnsRecords.push({
             type: "A",
             name: "@",
             value: ip,
-            status: isConfigured ? "configured" : "pending",
+            status: "pending",
           });
         }
       }
@@ -414,15 +438,27 @@ export class VercelService {
     const dnsRecords: { type: string; name: string; value: string; status: "configured" | "pending" | "error" }[] = [];
     
     if (config) {
+      // Use actual configured A records if they exist
+      if (config.aRecords && config.aRecords.length > 0) {
+        for (const aRecord of config.aRecords) {
+          dnsRecords.push({
+            type: "A",
+            name: "@",
+            value: aRecord.value,
+            status: "configured",
+          });
+        }
+      }
+      
+      // If no A records configured yet, show what to configure
       const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-      if (preferredIPv4 && preferredIPv4.value.length > 0) {
+      if ((!config.aRecords || config.aRecords.length === 0) && preferredIPv4 && preferredIPv4.value.length > 0) {
         for (const ip of preferredIPv4.value) {
-          const isConfigured = config.aRecords.some(a => a.value === ip);
           dnsRecords.push({
             type: "A",
             name: "@",
             value: ip,
-            status: isConfigured ? "configured" : "pending",
+            status: "pending",
           });
         }
       }
