@@ -12,6 +12,70 @@ export const supabase = supabaseUrl && supabaseKey
   ? createClient(supabaseUrl, supabaseKey)
   : null;
 
+// ==================== ENCRYPTION HELPERS ====================
+// Require SESSION_SECRET for encryption - fail fast if missing
+const ENCRYPTION_KEY = process.env.SESSION_SECRET;
+
+if (!ENCRYPTION_KEY) {
+  console.warn('SESSION_SECRET not set. Encryption for sensitive data will be disabled.');
+}
+
+function deriveKey(secret: string): Buffer {
+  return crypto.scryptSync(secret, 'egpress-salt', 32);
+}
+
+export function encrypt(text: string): string {
+  // Require encryption key - fail if not configured
+  if (!ENCRYPTION_KEY) {
+    throw new Error('Cannot encrypt - SESSION_SECRET not configured. Sensitive data storage requires encryption.');
+  }
+  
+  try {
+    const key = deriveKey(ENCRYPTION_KEY);
+    const iv = crypto.randomBytes(16);
+    const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+    const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
+    const authTag = cipher.getAuthTag();
+    // Format: ENC:iv:authTag:encrypted (all base64)
+    return `ENC:${iv.toString('base64')}:${authTag.toString('base64')}:${encrypted.toString('base64')}`;
+  } catch (err) {
+    console.error('Encryption error:', err);
+    throw new Error('Failed to encrypt sensitive data');
+  }
+}
+
+export function decrypt(encryptedText: string): string {
+  // Check if it's an encrypted format (starts with ENC:)
+  if (!encryptedText.startsWith('ENC:')) {
+    return encryptedText; // Return as-is if not encrypted (legacy data)
+  }
+  
+  if (!ENCRYPTION_KEY) {
+    console.error('Cannot decrypt - SESSION_SECRET not configured');
+    throw new Error('Decryption failed - encryption key not available');
+  }
+  
+  try {
+    const parts = encryptedText.substring(4).split(':'); // Remove 'ENC:' prefix
+    if (parts.length !== 3) {
+      throw new Error('Invalid encrypted format');
+    }
+    
+    const key = deriveKey(ENCRYPTION_KEY);
+    const iv = Buffer.from(parts[0], 'base64');
+    const authTag = Buffer.from(parts[1], 'base64');
+    const encrypted = Buffer.from(parts[2], 'base64');
+    
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
+    return decrypted.toString('utf8');
+  } catch (err) {
+    console.error('Decryption error:', err);
+    throw new Error('Failed to decrypt sensitive data');
+  }
+}
+
 // Legacy user settings (for migration compatibility)
 export interface UserSettings {
   github_token_hash: string;
@@ -77,7 +141,14 @@ export async function getRepositorySettings(repository: string): Promise<Reposit
       return null;
     }
     
-    return data as RepositorySettings;
+    const settings = data as RepositorySettings;
+    
+    // Decrypt sensitive fields
+    if (settings.search_console_service_account) {
+      settings.search_console_service_account = decrypt(settings.search_console_service_account);
+    }
+    
+    return settings;
   } catch (err) {
     console.error('Supabase load error:', err);
     return null;
@@ -187,10 +258,13 @@ export async function updateRepositorySearchConsole(
   if (!supabase) return false;
   
   try {
+    // Encrypt the service account JSON before storing
+    const encryptedJson = encrypt(serviceAccountJson);
+    
     const { error } = await supabase
       .from('repository_settings')
       .update({ 
-        search_console_service_account: serviceAccountJson,
+        search_console_service_account: encryptedJson,
         search_console_site_url: siteUrl || null,
         updated_at: new Date().toISOString(),
       })

@@ -8,18 +8,20 @@ This CMS provides a visual interface for managing blog content directly from Git
 
 - **CRUD Operations**: Create, read, update, and delete blog posts
 - **GitHub Integration**: Connect to any GitHub repository and sync changes
-- **Theme Customization**: Customize blog colors with live preview
+- **Theme Customization**: Customize blog colors with live preview (auto HSL conversion)
 - **Branding Editor**: Configure site name, logo, favicon, social links, and author info
 - **AdSense Manager**: Configure Google AdSense with multiple ad slot placements
 - **Static Pages Editor**: Edit non-blog pages like About, Contact, Privacy
 - **AI Post Generator**: Generate blog posts using Google Gemini AI
-- **Google Search Console**: Service account integration with site selection, submit URLs for indexing
+- **Google Search Console**: Service account integration with encrypted storage, site selection, submit URLs for indexing
 - **Vercel Integration**: Automatic project linking from GitHub repo, deploy to Vercel, manage domains
 - **Sitemap Generation**: Automatic sitemap.xml generation for SEO
 - **Site Cloner**: Clone repositories to create new blog sites
 - **File Browser**: Navigate and edit repository files
 - **Markdown Editor**: Monaco-based editor with syntax highlighting and preview
 - **Split-panel Layout**: Side-by-side editing and preview experience
+- **Onboarding Wizard**: Step-by-step guided setup for new users
+- **Setup Progress**: Dashboard checklist tracking integration status
 
 ## Project Structure
 

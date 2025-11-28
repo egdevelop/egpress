@@ -527,6 +527,61 @@ export async function registerRoutes(
       await fetchBranches(parsed.owner, parsed.repo);
       await syncRepositoryData(parsed.owner, parsed.repo, repoData.default_branch);
 
+      // Load repository-specific settings from Supabase
+      const repoSettings = await getRepositorySettings(repoData.full_name);
+      if (repoSettings) {
+        // Load Gemini API key
+        if (repoSettings.gemini_api_key) {
+          await storage.setGeminiApiKey(repoSettings.gemini_api_key);
+        }
+        // Load Vercel config
+        if (repoSettings.vercel_token) {
+          await storage.setVercelConfig({
+            token: repoSettings.vercel_token,
+            teamId: repoSettings.vercel_team_id,
+            username: req.session.githubUsername || "",
+          });
+          if (repoSettings.vercel_project_id) {
+            await storage.setVercelProject({
+              id: repoSettings.vercel_project_id,
+              name: repoSettings.vercel_project_name || "",
+              framework: "astro",
+            });
+          }
+        }
+        // Load Search Console config (full JSON)
+        if (repoSettings.search_console_service_account) {
+          try {
+            const parsed = JSON.parse(repoSettings.search_console_service_account);
+            await storage.setSearchConsoleConfig({
+              serviceAccountJson: repoSettings.search_console_service_account,
+              clientEmail: parsed.client_email,
+              privateKey: parsed.private_key,
+              siteUrl: repoSettings.search_console_site_url || "",
+            });
+          } catch (e) {
+            console.warn("Failed to parse saved Search Console config");
+          }
+        }
+        // Load AdSense config
+        if (repoSettings.adsense_publisher_id) {
+          await storage.setAdsenseConfig({
+            enabled: true,
+            publisherId: repoSettings.adsense_publisher_id,
+            autoAdsEnabled: false,
+            slots: repoSettings.adsense_slots || {},
+          });
+        }
+      } else if (req.session.githubToken && req.session.githubUsername) {
+        // Create initial repository settings record
+        await saveRepositorySettings(
+          repoData.full_name,
+          req.session.githubToken,
+          req.session.githubUsername,
+          {}
+        );
+      }
+
       res.json({ success: true, data: repository });
     } catch (error: any) {
       console.error("Connect error:", error);
@@ -1782,11 +1837,11 @@ export async function registerRoutes(
     }
   });
 
-  // Get saved Gemini API key (protected)
+  // Get saved Gemini API key status (protected) - does NOT return the actual key
   app.get("/api/ai/key", requireAuth, async (req, res) => {
     try {
       const key = await storage.getGeminiApiKey();
-      res.json({ success: true, data: { hasKey: !!key, key: key || null } });
+      res.json({ success: true, data: { hasKey: !!key } });
     } catch (error) {
       res.json({ success: false, error: "Failed to get API key" });
     }
@@ -1877,15 +1932,28 @@ export async function registerRoutes(
         privateKey: parsed.private_key,
       });
 
-      // Persist to Supabase
-      const supabaseResult = await updateSearchConsoleConfig(
-        req.session.githubToken!,
-        parsed.client_email,
-        parsed.private_key,
-        ""
-      );
-      if (!supabaseResult) {
-        console.warn("Failed to persist Search Console config to Supabase");
+      // Persist to Supabase (repository-based, encrypted)
+      const repo = await storage.getRepository();
+      if (repo) {
+        const supabaseResult = await updateRepositorySearchConsole(
+          repo.fullName,
+          serviceAccountJson,
+          ""
+        );
+        if (!supabaseResult) {
+          console.warn("Failed to persist Search Console config to Supabase");
+        }
+      } else {
+        // Fallback to legacy user-based storage
+        const supabaseResult = await updateSearchConsoleConfig(
+          req.session.githubToken!,
+          parsed.client_email,
+          parsed.private_key,
+          ""
+        );
+        if (!supabaseResult) {
+          console.warn("Failed to persist Search Console config to Supabase (legacy)");
+        }
       }
 
       res.json({ success: true });
@@ -1902,9 +1970,18 @@ export async function registerRoutes(
       await storage.setIndexingStatus([]);
       
       // Clear from Supabase
-      const supabaseResult = await clearSearchConsoleConfig(req.session.githubToken!);
-      if (!supabaseResult) {
-        console.warn("Failed to clear Search Console config from Supabase");
+      const repo = await storage.getRepository();
+      if (repo) {
+        const supabaseResult = await clearRepositorySearchConsole(repo.fullName);
+        if (!supabaseResult) {
+          console.warn("Failed to clear Search Console config from Supabase");
+        }
+      } else {
+        // Fallback to legacy
+        const supabaseResult = await clearSearchConsoleConfig(req.session.githubToken!);
+        if (!supabaseResult) {
+          console.warn("Failed to clear Search Console config from Supabase (legacy)");
+        }
       }
       
       res.json({ success: true });

@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
 import { 
   FileText, 
   GitCommit, 
@@ -11,7 +12,14 @@ import {
   Plus,
   ArrowRight,
   FolderOpen,
-  Palette
+  Palette,
+  Check,
+  Circle,
+  Rocket,
+  Search,
+  Sparkles,
+  ExternalLink,
+  Github
 } from "lucide-react";
 import { Link } from "wouter";
 import type { Post, Repository } from "@shared/schema";
@@ -127,6 +135,21 @@ export default function Dashboard() {
     enabled: !!repoData?.data,
   });
 
+  const { data: vercelData } = useQuery<{ success: boolean; data: { hasToken: boolean; project?: { id: string; name: string } } }>({
+    queryKey: ["/api/vercel/config"],
+    enabled: !!repoData?.data,
+  });
+
+  const { data: gscData } = useQuery<{ success: boolean; data: { hasCredentials: boolean; siteUrl?: string } | null }>({
+    queryKey: ["/api/search-console/config"],
+    enabled: !!repoData?.data,
+  });
+
+  const { data: geminiData } = useQuery<{ success: boolean; data: { hasKey: boolean } }>({
+    queryKey: ["/api/ai/key"],
+    enabled: !!repoData?.data,
+  });
+
   const repository = repoData?.data;
   const posts = postsData?.data || [];
   const publishedPosts = posts.filter(p => !p.draft);
@@ -134,6 +157,23 @@ export default function Dashboard() {
   const recentPosts = [...posts].sort((a, b) => 
     new Date(b.pubDate).getTime() - new Date(a.pubDate).getTime()
   ).slice(0, 5);
+
+  const vercelConnected = vercelData?.data?.hasToken && vercelData?.data?.project;
+  const gscConnected = gscData?.data?.hasCredentials && gscData?.data?.siteUrl;
+  const geminiConnected = geminiData?.data?.hasKey;
+  const hasContent = posts.length > 0;
+
+  const setupSteps = [
+    { id: 'repo', title: 'Connect Repository', done: !!repository, href: '/' },
+    { id: 'content', title: 'Create First Post', done: hasContent, href: '/posts/new' },
+    { id: 'vercel', title: 'Setup Vercel Deploy', done: vercelConnected, href: '/vercel' },
+    { id: 'gsc', title: 'Add Search Console', done: gscConnected, href: '/search-console', optional: true },
+    { id: 'ai', title: 'Enable AI Generator', done: geminiConnected, href: '/ai', optional: true },
+  ];
+  
+  const completedSteps = setupSteps.filter(s => s.done).length;
+  const totalRequired = setupSteps.filter(s => !s.optional).length;
+  const requiredCompleted = setupSteps.filter(s => !s.optional && s.done).length;
 
   return (
     <div className="p-6 max-w-6xl mx-auto space-y-8">
@@ -147,21 +187,150 @@ export default function Dashboard() {
       </div>
 
       {!repository ? (
-        <Card className="p-8">
-          <div className="flex flex-col items-center justify-center text-center">
-            <div className="w-16 h-16 rounded-full bg-primary/10 flex items-center justify-center mb-4">
-              <GitCommit className="w-8 h-8 text-primary" />
-            </div>
-            <h2 className="text-xl font-semibold mb-2">No Repository Connected</h2>
-            <p className="text-muted-foreground max-w-md mb-6">
-              Connect your blog repository to start managing your content. 
-              Go to Settings to get started.
-            </p>
-            <Badge variant="outline">
-              Waiting for repository connection...
-            </Badge>
+        <div className="space-y-6">
+          <Card className="border-primary/20 bg-primary/5">
+            <CardContent className="pt-6">
+              <div className="flex flex-col md:flex-row items-start gap-6">
+                <div className="w-16 h-16 rounded-2xl bg-primary flex items-center justify-center shrink-0">
+                  <Github className="w-8 h-8 text-primary-foreground" />
+                </div>
+                <div className="flex-1">
+                  <h2 className="text-2xl font-bold mb-2">Welcome to EG Press!</h2>
+                  <p className="text-muted-foreground mb-4">
+                    Let's get your blog set up. Select a repository from the sidebar to connect your Astro blog template.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <Badge variant="secondary" className="gap-1">
+                      <Circle className="w-2 h-2 fill-amber-500 text-amber-500" />
+                      Step 1 of 3
+                    </Badge>
+                    <span className="text-sm text-muted-foreground">Connect Repository</span>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <div className="grid gap-4 md:grid-cols-3">
+            <Card className="border-primary/30">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                    <span className="text-sm font-bold text-primary">1</span>
+                  </div>
+                  <CardTitle className="text-base">Connect Repository</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Select your Astro blog repository from the dropdown in the sidebar.
+                </p>
+                <Badge variant="outline" className="text-amber-600 border-amber-300">
+                  <Circle className="w-2 h-2 fill-current mr-1" />
+                  Current Step
+                </Badge>
+              </CardContent>
+            </Card>
+
+            <Card className="opacity-60">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                    <span className="text-sm font-bold text-muted-foreground">2</span>
+                  </div>
+                  <CardTitle className="text-base">Create Content</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Write blog posts, customize theme colors, and configure your site branding.
+                </p>
+                <Badge variant="secondary">
+                  Upcoming
+                </Badge>
+              </CardContent>
+            </Card>
+
+            <Card className="opacity-60">
+              <CardHeader className="pb-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 rounded-full bg-muted flex items-center justify-center">
+                    <span className="text-sm font-bold text-muted-foreground">3</span>
+                  </div>
+                  <CardTitle className="text-base">Deploy & Go Live</CardTitle>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-3">
+                  Connect Vercel to deploy your site and make it accessible to the world.
+                </p>
+                <Badge variant="secondary">
+                  Upcoming
+                </Badge>
+              </CardContent>
+            </Card>
           </div>
-        </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Getting Started Guide</CardTitle>
+              <CardDescription>Quick tips to help you set up EG Press</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-start gap-4 p-4 rounded-lg bg-muted/50">
+                <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                  <Github className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h4 className="font-medium mb-1">Need a blog template?</h4>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    EG Press works best with Astro blog templates. You can fork a starter template to get started.
+                  </p>
+                  <a
+                    href="https://github.com/topics/astro-blog"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-primary hover:underline inline-flex items-center gap-1"
+                  >
+                    Browse Astro Blog Templates
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+              
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="flex items-center gap-3 p-3 rounded-lg border border-border/50">
+                  <Sparkles className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-sm font-medium">AI Content Generation</p>
+                    <p className="text-xs text-muted-foreground">Generate posts with Gemini AI</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg border border-border/50">
+                  <Rocket className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-sm font-medium">One-Click Deploy</p>
+                    <p className="text-xs text-muted-foreground">Deploy to Vercel instantly</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg border border-border/50">
+                  <Search className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-sm font-medium">SEO Tools</p>
+                    <p className="text-xs text-muted-foreground">Google Search Console integration</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3 p-3 rounded-lg border border-border/50">
+                  <Palette className="w-5 h-5 text-primary" />
+                  <div>
+                    <p className="text-sm font-medium">Theme Customization</p>
+                    <p className="text-xs text-muted-foreground">Personalize colors and branding</p>
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       ) : (
         <>
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
@@ -235,32 +404,74 @@ export default function Dashboard() {
               </CardContent>
             </Card>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>Quick Actions</CardTitle>
-                <CardDescription>Common tasks</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <QuickAction
-                  title="New Post"
-                  description="Create a new blog post"
-                  icon={Plus}
-                  href="/posts/new"
-                />
-                <QuickAction
-                  title="Browse Files"
-                  description="Explore repository files"
-                  icon={FolderOpen}
-                  href="/files"
-                />
-                <QuickAction
-                  title="Theme Settings"
-                  description="Customize colors and styles"
-                  icon={Palette}
-                  href="/theme"
-                />
-              </CardContent>
-            </Card>
+            <div className="space-y-4">
+              {requiredCompleted < totalRequired && (
+                <Card className="border-primary/20">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-base">Setup Progress</CardTitle>
+                      <Badge variant="secondary" className="text-xs">
+                        {completedSteps}/{setupSteps.length}
+                      </Badge>
+                    </div>
+                    <Progress value={(completedSteps / setupSteps.length) * 100} className="h-1.5 mt-2" />
+                  </CardHeader>
+                  <CardContent className="pt-2 space-y-2">
+                    {setupSteps.map((step) => (
+                      <Link key={step.id} href={step.href}>
+                        <div className={`flex items-center gap-3 p-2 rounded-md hover-elevate cursor-pointer ${step.done ? 'opacity-60' : ''}`}>
+                          {step.done ? (
+                            <div className="w-5 h-5 rounded-full bg-green-500 flex items-center justify-center">
+                              <Check className="w-3 h-3 text-white" />
+                            </div>
+                          ) : (
+                            <div className="w-5 h-5 rounded-full border-2 border-primary flex items-center justify-center">
+                              <Circle className="w-2 h-2 fill-primary text-primary" />
+                            </div>
+                          )}
+                          <span className={`text-sm flex-1 ${step.done ? 'line-through text-muted-foreground' : 'font-medium'}`}>
+                            {step.title}
+                          </span>
+                          {step.optional && !step.done && (
+                            <Badge variant="outline" className="text-xs">Optional</Badge>
+                          )}
+                          {!step.done && (
+                            <ArrowRight className="w-4 h-4 text-muted-foreground" />
+                          )}
+                        </div>
+                      </Link>
+                    ))}
+                  </CardContent>
+                </Card>
+              )}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle>Quick Actions</CardTitle>
+                  <CardDescription>Common tasks</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <QuickAction
+                    title="New Post"
+                    description="Create a new blog post"
+                    icon={Plus}
+                    href="/posts/new"
+                  />
+                  <QuickAction
+                    title="Browse Files"
+                    description="Explore repository files"
+                    icon={FolderOpen}
+                    href="/files"
+                  />
+                  <QuickAction
+                    title="Theme Settings"
+                    description="Customize colors and styles"
+                    icon={Palette}
+                    href="/theme"
+                  />
+                </CardContent>
+              </Card>
+            </div>
           </div>
         </>
       )}

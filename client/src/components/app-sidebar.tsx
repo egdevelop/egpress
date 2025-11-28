@@ -60,67 +60,86 @@ const contentItems = [
     title: "Dashboard",
     url: "/",
     icon: LayoutDashboard,
+    description: "Overview & quick actions",
   },
   {
     title: "Posts",
     url: "/posts",
     icon: FileText,
+    description: "Manage blog posts",
   },
   {
     title: "Pages",
     url: "/pages",
     icon: FileCode,
+    description: "Edit static pages",
   },
   {
     title: "File Browser",
     url: "/files",
     icon: FolderTree,
+    description: "Browse repository files",
   },
 ];
 
-const customizeItems = [
+const appearanceItems = [
   {
     title: "Theme",
     url: "/theme",
     icon: Palette,
+    description: "Customize colors",
   },
   {
     title: "Branding",
     url: "/branding",
     icon: Image,
-  },
-  {
-    title: "AdSense",
-    url: "/adsense",
-    icon: DollarSign,
+    description: "Logo, name & social",
   },
 ];
 
-const toolsItems = [
+const integrationsItems = [
   {
-    title: "AI Generator",
-    url: "/ai",
-    icon: Sparkles,
-  },
-  {
-    title: "Vercel Deploy",
+    title: "Vercel",
     url: "/vercel",
     icon: Rocket,
+    description: "Deploy & domains",
+    configKey: "vercel",
   },
   {
     title: "Search Console",
     url: "/search-console",
     icon: Search,
+    description: "SEO & indexing",
+    configKey: "gsc",
   },
+  {
+    title: "AdSense",
+    url: "/adsense",
+    icon: DollarSign,
+    description: "Ad monetization",
+    configKey: "adsense",
+  },
+  {
+    title: "AI Generator",
+    url: "/ai",
+    icon: Sparkles,
+    description: "Generate posts with AI",
+    configKey: "gemini",
+  },
+];
+
+const systemItems = [
   {
     title: "Clone Site",
     url: "/clone",
     icon: Copy,
+    description: "Create new site from template",
   },
   {
     title: "Settings",
     url: "/settings",
     icon: Settings,
+    description: "App configuration",
   },
 ];
 
@@ -341,10 +360,10 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Customize</SidebarGroupLabel>
+          <SidebarGroupLabel>Appearance</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {customizeItems.map((item) => {
+              {appearanceItems.map((item) => {
                 const isActive = location === item.url;
                 return (
                   <SidebarMenuItem key={item.title}>
@@ -366,10 +385,35 @@ export function AppSidebar() {
         </SidebarGroup>
 
         <SidebarGroup>
-          <SidebarGroupLabel>Tools</SidebarGroupLabel>
+          <SidebarGroupLabel>Integrations</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {toolsItems.map((item) => {
+              {integrationsItems.map((item) => {
+                const isActive = location === item.url;
+                return (
+                  <SidebarMenuItem key={item.title}>
+                    <SidebarMenuButton 
+                      asChild 
+                      isActive={isActive}
+                      data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                    >
+                      <Link href={item.url}>
+                        <item.icon className="w-4 h-4" />
+                        <span>{item.title}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>System</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {systemItems.map((item) => {
                 const isActive = location === item.url;
                 return (
                   <SidebarMenuItem key={item.title}>

@@ -5,6 +5,21 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 
+// Startup validation for security requirements
+const hasSupabase = process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY;
+const hasSessionSecret = !!process.env.SESSION_SECRET;
+
+if (hasSupabase && !hasSessionSecret) {
+  console.error("FATAL: SESSION_SECRET is required when Supabase is configured for encrypted storage.");
+  console.error("Set SESSION_SECRET environment variable to enable secure storage of API keys.");
+  process.exit(1);
+}
+
+if (!hasSessionSecret) {
+  console.warn("WARNING: SESSION_SECRET not configured. Using fallback for sessions.");
+  console.warn("For production deployments, set SESSION_SECRET for secure session handling.");
+}
+
 const app = express();
 const httpServer = createServer(app);
 
