@@ -954,6 +954,211 @@ export async function registerRoutes(
     }
   });
 
+  // Get branding from Header.astro and Footer.astro
+  app.get("/api/branding", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: true, data: null });
+      }
+
+      const octokit = await getGitHubClient();
+      
+      let headerContent = "";
+      let footerContent = "";
+      
+      try {
+        const { data: headerFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/components/Header.astro",
+          ref: repo.activeBranch,
+        });
+        if (!Array.isArray(headerFile) && headerFile.content) {
+          headerContent = Buffer.from(headerFile.content, "base64").toString("utf-8");
+        }
+      } catch {}
+      
+      try {
+        const { data: footerFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/components/Footer.astro",
+          ref: repo.activeBranch,
+        });
+        if (!Array.isArray(footerFile) && footerFile.content) {
+          footerContent = Buffer.from(footerFile.content, "base64").toString("utf-8");
+        }
+      } catch {}
+
+      // Parse site name from Header
+      const siteNameMatch = headerContent.match(/<span[^>]*>([^<]+)<\/span>\s*<\/a>\s*(?:<!--\s*Desktop|<\/div>|$)/);
+      const siteName = siteNameMatch ? siteNameMatch[1].trim() : "";
+      
+      // Parse logo letter from Header  
+      const logoLetterMatch = headerContent.match(/<span class="text-white font-bold[^"]*">([^<]+)<\/span>/);
+      const logoLetter = logoLetterMatch ? logoLetterMatch[1].trim() : "";
+
+      // Parse description from Footer
+      const descMatch = footerContent.match(/<p class="text-sm text-gray-400[^"]*">\s*([^<]+)/);
+      const description = descMatch ? descMatch[1].trim() : "";
+
+      // Parse social links from Footer
+      const twitterMatch = footerContent.match(/\{\s*href:\s*['"]([^'"]+)['"],\s*label:\s*['"]Twitter['"]/);
+      const linkedinMatch = footerContent.match(/\{\s*href:\s*['"]([^'"]+)['"],\s*label:\s*['"]LinkedIn['"]/);
+      const facebookMatch = footerContent.match(/\{\s*href:\s*['"]([^'"]+)['"],\s*label:\s*['"]Facebook['"]/);
+
+      res.json({
+        success: true,
+        data: {
+          siteName,
+          logoLetter,
+          description,
+          socialLinks: {
+            twitter: twitterMatch ? twitterMatch[1] : "",
+            linkedin: linkedinMatch ? linkedinMatch[1] : "",
+            facebook: facebookMatch ? facebookMatch[1] : "",
+          },
+          headerContent,
+          footerContent,
+        }
+      });
+    } catch (error: any) {
+      console.error("Get branding error:", error);
+      res.json({ success: false, error: error.message || "Failed to get branding" });
+    }
+  });
+
+  // Update branding in Header.astro and Footer.astro
+  app.put("/api/branding", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const { siteName, logoLetter, description, socialLinks } = req.body;
+      const octokit = await getGitHubClient();
+
+      // Get current Header.astro
+      let headerContent = "";
+      let headerSha: string | undefined;
+      try {
+        const { data: headerFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/components/Header.astro",
+          ref: repo.activeBranch,
+        });
+        if (!Array.isArray(headerFile) && headerFile.content) {
+          headerContent = Buffer.from(headerFile.content, "base64").toString("utf-8");
+          headerSha = headerFile.sha;
+        }
+      } catch {}
+
+      // Get current Footer.astro
+      let footerContent = "";
+      let footerSha: string | undefined;
+      try {
+        const { data: footerFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/components/Footer.astro",
+          ref: repo.activeBranch,
+        });
+        if (!Array.isArray(footerFile) && footerFile.content) {
+          footerContent = Buffer.from(footerFile.content, "base64").toString("utf-8");
+          footerSha = footerFile.sha;
+        }
+      } catch {}
+
+      // Update Header.astro
+      if (headerContent && siteName) {
+        // Update site name in header
+        headerContent = headerContent.replace(
+          /(<span class="text-xl font-bold[^"]*">)[^<]+(<\/span>)/g,
+          `$1${siteName}$2`
+        );
+        // Update logo letter
+        if (logoLetter) {
+          headerContent = headerContent.replace(
+            /(<span class="text-white font-bold[^"]*">)[^<]+(<\/span>)/g,
+            `$1${logoLetter}$2`
+          );
+        }
+
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/components/Header.astro",
+          message: "Update Header branding",
+          content: Buffer.from(headerContent).toString("base64"),
+          sha: headerSha,
+          branch: repo.activeBranch,
+        });
+      }
+
+      // Update Footer.astro
+      if (footerContent) {
+        // Update site name in footer
+        if (siteName) {
+          footerContent = footerContent.replace(
+            /(<span class="text-xl font-bold text-white">)[^<]+(<\/span>)/g,
+            `$1${siteName}$2`
+          );
+          // Update copyright
+          footerContent = footerContent.replace(
+            /(&copy; \{currentYear\} )[^.]+(\. All rights reserved\.)/g,
+            `$1${siteName}$2`
+          );
+        }
+        // Update description
+        if (description !== undefined) {
+          footerContent = footerContent.replace(
+            /(<p class="text-sm text-gray-400 mb-4">)\s*[^<]+(<\/p>)/,
+            `$1\n          ${description}\n        $2`
+          );
+        }
+        // Update social links
+        if (socialLinks) {
+          if (socialLinks.twitter) {
+            footerContent = footerContent.replace(
+              /(\{\s*href:\s*['"])[^'"]+(['"],\s*label:\s*['"]Twitter['"])/,
+              `$1${socialLinks.twitter}$2`
+            );
+          }
+          if (socialLinks.linkedin) {
+            footerContent = footerContent.replace(
+              /(\{\s*href:\s*['"])[^'"]+(['"],\s*label:\s*['"]LinkedIn['"])/,
+              `$1${socialLinks.linkedin}$2`
+            );
+          }
+          if (socialLinks.facebook) {
+            footerContent = footerContent.replace(
+              /(\{\s*href:\s*['"])[^'"]+(['"],\s*label:\s*['"]Facebook['"])/,
+              `$1${socialLinks.facebook}$2`
+            );
+          }
+        }
+
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/components/Footer.astro",
+          message: "Update Footer branding",
+          content: Buffer.from(footerContent).toString("base64"),
+          sha: footerSha,
+          branch: repo.activeBranch,
+        });
+      }
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Update branding error:", error);
+      res.json({ success: false, error: error.message || "Failed to update branding" });
+    }
+  });
+
   // Get AdSense config
   app.get("/api/adsense", async (req, res) => {
     try {

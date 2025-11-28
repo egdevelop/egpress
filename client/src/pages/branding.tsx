@@ -16,32 +16,37 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { Palette, Image, User, Globe, Save, RefreshCw, Link2 } from "lucide-react";
+import { Palette, Globe, Save, RefreshCw, Link2, Type } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository, SiteConfig } from "@shared/schema";
+import type { Repository } from "@shared/schema";
+import { useEffect } from "react";
 
 const brandingFormSchema = z.object({
   siteName: z.string().min(1, "Site name is required"),
-  tagline: z.string(),
+  logoLetter: z.string().max(2, "Max 2 characters"),
   description: z.string(),
-  logoUrl: z.string().optional(),
-  faviconUrl: z.string().optional(),
   socialLinks: z.object({
     twitter: z.string().optional(),
-    github: z.string().optional(),
     linkedin: z.string().optional(),
-    instagram: z.string().optional(),
-    youtube: z.string().optional(),
-  }),
-  author: z.object({
-    name: z.string(),
-    avatar: z.string().optional(),
-    bio: z.string().optional(),
+    facebook: z.string().optional(),
   }),
 });
 
 type BrandingFormValues = z.infer<typeof brandingFormSchema>;
+
+interface BrandingData {
+  siteName: string;
+  logoLetter: string;
+  description: string;
+  socialLinks: {
+    twitter: string;
+    linkedin: string;
+    facebook: string;
+  };
+  headerContent: string;
+  footerContent: string;
+}
 
 export default function Branding() {
   const { toast } = useToast();
@@ -50,8 +55,8 @@ export default function Branding() {
     queryKey: ["/api/repository"],
   });
 
-  const { data: configData, isLoading } = useQuery<{ success: boolean; data: SiteConfig }>({
-    queryKey: ["/api/site-config"],
+  const { data: brandingData, isLoading } = useQuery<{ success: boolean; data: BrandingData | null }>({
+    queryKey: ["/api/branding"],
     enabled: !!repoData?.data,
   });
 
@@ -59,50 +64,47 @@ export default function Branding() {
     resolver: zodResolver(brandingFormSchema),
     defaultValues: {
       siteName: "",
-      tagline: "",
+      logoLetter: "",
       description: "",
-      logoUrl: "",
-      faviconUrl: "",
       socialLinks: {
         twitter: "",
-        github: "",
         linkedin: "",
-        instagram: "",
-        youtube: "",
-      },
-      author: {
-        name: "",
-        avatar: "",
-        bio: "",
+        facebook: "",
       },
     },
-    values: configData?.data ? {
-      siteName: configData.data.siteName,
-      tagline: configData.data.tagline,
-      description: configData.data.description || "",
-      logoUrl: configData.data.logoUrl || "",
-      faviconUrl: configData.data.faviconUrl || "",
-      socialLinks: configData.data.socialLinks || {},
-      author: configData.data.author || { name: "" },
-    } : undefined,
   });
+
+  useEffect(() => {
+    if (brandingData?.data) {
+      form.reset({
+        siteName: brandingData.data.siteName || "",
+        logoLetter: brandingData.data.logoLetter || "",
+        description: brandingData.data.description || "",
+        socialLinks: {
+          twitter: brandingData.data.socialLinks?.twitter || "",
+          linkedin: brandingData.data.socialLinks?.linkedin || "",
+          facebook: brandingData.data.socialLinks?.facebook || "",
+        },
+      });
+    }
+  }, [brandingData, form]);
 
   const saveMutation = useMutation({
     mutationFn: async (data: BrandingFormValues) => {
-      const response = await apiRequest("PUT", "/api/site-config", data);
+      const response = await apiRequest("PUT", "/api/branding", data);
       return response.json();
     },
     onSuccess: (data) => {
       if (data.success) {
         toast({
           title: "Branding Saved",
-          description: "Site configuration has been committed to the repository",
+          description: "Header.astro and Footer.astro have been updated",
         });
-        queryClient.invalidateQueries({ queryKey: ["/api/site-config"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/branding"] });
       } else {
         toast({
           title: "Save Failed",
-          description: data.error || "Failed to save configuration",
+          description: data.error || "Failed to save branding",
           variant: "destructive",
         });
       }
@@ -146,9 +148,9 @@ export default function Branding() {
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">Branding & Logo</h1>
+        <h1 className="text-3xl font-semibold">Branding</h1>
         <p className="text-muted-foreground mt-1">
-          Customize your site's identity and social presence
+          Edit Header.astro and Footer.astro directly
         </p>
       </div>
 
@@ -161,64 +163,71 @@ export default function Branding() {
                 Site Identity
               </CardTitle>
               <CardDescription>
-                Your blog's name, tagline, and description
+                Updates Header.astro and Footer.astro
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-6">
-              <FormField
-                control={form.control}
-                name="siteName"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Site Name</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="My Awesome Blog"
-                        {...field}
-                        data-testid="input-site-name"
-                      />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
+              <div className="grid gap-4 md:grid-cols-2">
+                <FormField
+                  control={form.control}
+                  name="siteName"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Site Name</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="My Blog"
+                          {...field}
+                          data-testid="input-site-name"
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Appears in header, footer, and copyright
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
 
-              <FormField
-                control={form.control}
-                name="tagline"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Tagline</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="A short catchy phrase"
-                        {...field}
-                        data-testid="input-tagline"
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      A brief phrase that describes your blog
-                    </FormDescription>
-                  </FormItem>
-                )}
-              />
+                <FormField
+                  control={form.control}
+                  name="logoLetter"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Logo Letter</FormLabel>
+                      <FormControl>
+                        <Input
+                          placeholder="R"
+                          maxLength={2}
+                          {...field}
+                          data-testid="input-logo-letter"
+                        />
+                      </FormControl>
+                      <FormDescription>
+                        Letter shown in the logo box (1-2 chars)
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              </div>
 
               <FormField
                 control={form.control}
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Description</FormLabel>
+                    <FormLabel>Footer Description</FormLabel>
                     <FormControl>
                       <Textarea
-                        placeholder="Describe what your blog is about..."
+                        placeholder="A short description about your site..."
                         rows={3}
                         {...field}
                         data-testid="input-description"
                       />
                     </FormControl>
                     <FormDescription>
-                      Used for SEO and social sharing
+                      Shown in the footer below the logo
                     </FormDescription>
                   </FormItem>
                 )}
@@ -229,138 +238,20 @@ export default function Branding() {
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <Image className="w-5 h-5" />
-                Logo & Favicon
+                <Link2 className="w-5 h-5" />
+                Social Links
               </CardTitle>
               <CardDescription>
-                Upload or link to your visual assets
+                Social media links in footer
               </CardDescription>
             </CardHeader>
-            <CardContent className="space-y-6">
-              <FormField
-                control={form.control}
-                name="logoUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Logo URL</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://example.com/logo.png"
-                        {...field}
-                        data-testid="input-logo-url"
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      URL to your logo image (recommended: SVG or PNG)
-                    </FormDescription>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="faviconUrl"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Favicon URL</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://example.com/favicon.ico"
-                        {...field}
-                        data-testid="input-favicon-url"
-                      />
-                    </FormControl>
-                    <FormDescription>
-                      URL to your favicon (recommended: ICO or SVG)
-                    </FormDescription>
-                  </FormItem>
-                )}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="w-5 h-5" />
-                Author Information
-              </CardTitle>
-              <CardDescription>
-                Default author details for blog posts
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <FormField
-                control={form.control}
-                name="author.name"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Author Name</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="John Doe"
-                        {...field}
-                        data-testid="input-author-name"
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="author.avatar"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Avatar URL</FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://example.com/avatar.jpg"
-                        {...field}
-                        data-testid="input-author-avatar"
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="author.bio"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Bio</FormLabel>
-                    <FormControl>
-                      <Textarea
-                        placeholder="A short bio about yourself..."
-                        rows={2}
-                        {...field}
-                        data-testid="input-author-bio"
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Social Links</CardTitle>
-              <CardDescription>
-                Connect your social media profiles
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="grid gap-4 md:grid-cols-2">
+            <CardContent className="grid gap-4 md:grid-cols-3">
               <FormField
                 control={form.control}
                 name="socialLinks.twitter"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <Link2 className="w-4 h-4" />
-                      Twitter/X
-                    </FormLabel>
+                    <FormLabel>Twitter/X</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="https://twitter.com/username"
@@ -374,33 +265,10 @@ export default function Branding() {
 
               <FormField
                 control={form.control}
-                name="socialLinks.github"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <Link2 className="w-4 h-4" />
-                      GitHub
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://github.com/username"
-                        {...field}
-                        data-testid="input-social-github"
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
                 name="socialLinks.linkedin"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <Link2 className="w-4 h-4" />
-                      LinkedIn
-                    </FormLabel>
+                    <FormLabel>LinkedIn</FormLabel>
                     <FormControl>
                       <Input
                         placeholder="https://linkedin.com/in/username"
@@ -414,38 +282,15 @@ export default function Branding() {
 
               <FormField
                 control={form.control}
-                name="socialLinks.instagram"
+                name="socialLinks.facebook"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <Link2 className="w-4 h-4" />
-                      Instagram
-                    </FormLabel>
+                    <FormLabel>Facebook</FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="https://instagram.com/username"
+                        placeholder="https://facebook.com/page"
                         {...field}
-                        data-testid="input-social-instagram"
-                      />
-                    </FormControl>
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="socialLinks.youtube"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel className="flex items-center gap-2">
-                      <Link2 className="w-4 h-4" />
-                      YouTube
-                    </FormLabel>
-                    <FormControl>
-                      <Input
-                        placeholder="https://youtube.com/@channel"
-                        {...field}
-                        data-testid="input-social-youtube"
+                        data-testid="input-social-facebook"
                       />
                     </FormControl>
                   </FormItem>
@@ -453,6 +298,38 @@ export default function Branding() {
               />
             </CardContent>
           </Card>
+
+          {brandingData?.data?.headerContent && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Type className="w-5 h-5" />
+                  Current Files
+                </CardTitle>
+                <CardDescription>
+                  Preview of your component files
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium mb-2">Header.astro</p>
+                  <div className="bg-muted p-3 rounded-md max-h-32 overflow-auto">
+                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap">
+                      {brandingData.data.headerContent.slice(0, 500)}...
+                    </pre>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-2">Footer.astro</p>
+                  <div className="bg-muted p-3 rounded-md max-h-32 overflow-auto">
+                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap">
+                      {brandingData.data.footerContent.slice(0, 500)}...
+                    </pre>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <div className="flex justify-end">
             <Button
@@ -465,7 +342,7 @@ export default function Branding() {
               ) : (
                 <Save className="w-4 h-4 mr-2" />
               )}
-              Save Branding
+              Save to GitHub
             </Button>
           </div>
         </form>
