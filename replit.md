@@ -13,8 +13,9 @@ This CMS provides a visual interface for managing blog content directly from Git
 - **AdSense Manager**: Configure Google AdSense with multiple ad slot placements
 - **Static Pages Editor**: Edit non-blog pages like About, Contact, Privacy
 - **AI Post Generator**: Generate blog posts using Google Gemini AI
-- **Google Search Console**: Submit URLs for indexing and track status
-- **Vercel Integration**: Deploy to Vercel, manage domains, and view deployment status
+- **Google Search Console**: Service account integration with site selection, submit URLs for indexing
+- **Vercel Integration**: Automatic project linking from GitHub repo, deploy to Vercel, manage domains
+- **Sitemap Generation**: Automatic sitemap.xml generation for SEO
 - **Site Cloner**: Clone repositories to create new blog sites
 - **File Browser**: Navigate and edit repository files
 - **Markdown Editor**: Monaco-based editor with syntax highlighting and preview
@@ -163,6 +164,8 @@ This CMS provides a visual interface for managing blog content directly from Git
 - `GET /api/search-console/config` - Get Search Console configuration
 - `POST /api/search-console/credentials` - Save API credentials
 - `DELETE /api/search-console/credentials` - Clear credentials
+- `GET /api/search-console/sites` - List verified sites from service account
+- `POST /api/search-console/select-site` - Select a site for indexing
 - `GET /api/search-console/status` - Get URL indexing status
 - `POST /api/search-console/submit` - Submit URLs for indexing
 
@@ -173,12 +176,16 @@ This CMS provides a visual interface for managing blog content directly from Git
 - `GET /api/vercel/projects` - List Vercel projects
 - `POST /api/vercel/project/link` - Link or create Vercel project
 - `POST /api/vercel/project/unlink` - Unlink Vercel project
+- `POST /api/vercel/project/auto-link` - Auto-detect or create Vercel project based on connected repo
 - `GET /api/vercel/deployments` - Get deployments list
 - `POST /api/vercel/deployments` - Trigger new deployment
 - `GET /api/vercel/domains` - Get project domains
 - `POST /api/vercel/domains` - Add domain
 - `DELETE /api/vercel/domains/:domain` - Remove domain
 - `POST /api/vercel/domains/:domain/verify` - Verify domain
+
+### Sitemap
+- `GET /api/sitemap.xml` - Generate sitemap XML for connected repository
 
 ## Design System
 
