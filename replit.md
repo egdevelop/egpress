@@ -162,12 +162,14 @@ This CMS provides a visual interface for managing blog content directly from Git
 
 ### Google Search Console
 - `GET /api/search-console/config` - Get Search Console configuration
-- `POST /api/search-console/credentials` - Save API credentials
+- `POST /api/search-console/credentials` - Save API credentials (service account JSON)
 - `DELETE /api/search-console/credentials` - Clear credentials
 - `GET /api/search-console/sites` - List verified sites from service account
 - `POST /api/search-console/select-site` - Select a site for indexing
-- `GET /api/search-console/status` - Get URL indexing status
-- `POST /api/search-console/submit` - Submit URLs for indexing
+- `GET /api/search-console/status` - Get URL indexing status (uses Indexing API)
+- `POST /api/search-console/submit` - Submit URLs for indexing (uses Google Indexing API)
+- `GET /api/search-console/sitemaps` - List submitted sitemaps for selected site
+- `POST /api/search-console/submit-sitemap` - Submit sitemap to Google
 
 ### Vercel
 - `GET /api/vercel/config` - Get Vercel configuration status
