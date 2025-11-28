@@ -212,14 +212,19 @@ export class VercelService {
     configuredBy: string | null;
     recommendedIPv4: { rank: number; value: string[] }[];
     recommendedCNAME: { rank: number; value: string }[];
+    aRecords: { configuredBy: string; nameType: string; value: string }[];
+    cnameRecord: { host: string; value: string } | null;
   } | null> {
     try {
       const data = await this.request<any>(`/v6/domains/${encodeURIComponent(domain)}/config`);
+      console.log(`[Vercel API] getDomainConfig for ${domain}:`, JSON.stringify(data, null, 2));
       return {
         misconfigured: data.misconfigured ?? true,
         configuredBy: data.configuredBy || null,
         recommendedIPv4: data.recommendedIPv4 || [],
         recommendedCNAME: data.recommendedCNAME || [],
+        aRecords: data.aRecords || [],
+        cnameRecord: data.cnameRecord || null,
       };
     } catch (error) {
       console.error(`[Vercel API] getDomainConfig error for ${domain}:`, error);

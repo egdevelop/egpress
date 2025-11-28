@@ -337,22 +337,11 @@ export default function VercelPage() {
   };
 
   const getDomainStatusBadge = (domain: VercelDomain) => {
-    const hasVerificationChallenges = domain.verification && domain.verification.length > 0;
-    
-    if (domain.verified && domain.configured && !hasVerificationChallenges) {
+    if (domain.verified && domain.configured) {
       return (
         <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
           <CheckCircle2 className="w-3 h-3 mr-1" />
           Valid Configuration
-        </Badge>
-      );
-    }
-    
-    if (hasVerificationChallenges) {
-      return (
-        <Badge className="bg-red-500/10 text-red-500 border-red-500/20">
-          <AlertTriangle className="w-3 h-3 mr-1" />
-          Invalid Configuration
         </Badge>
       );
     }
@@ -367,9 +356,9 @@ export default function VercelPage() {
     }
     
     return (
-      <Badge className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20">
-        <CheckCircle2 className="w-3 h-3 mr-1" />
-        Valid Configuration
+      <Badge className="bg-red-500/10 text-red-500 border-red-500/20">
+        <AlertTriangle className="w-3 h-3 mr-1" />
+        Invalid Configuration
       </Badge>
     );
   };
