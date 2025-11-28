@@ -217,6 +217,30 @@ export default function VercelPage() {
     },
   });
 
+  const autoLinkMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("POST", "/api/vercel/auto-link");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: data.data.isNew ? "Project Created" : "Project Linked",
+          description: data.data.message,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/vercel/config"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/vercel/deployments"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/vercel/domains"] });
+      } else {
+        toast({
+          title: "Auto-Link Failed",
+          description: data.error,
+          variant: "destructive",
+        });
+      }
+    },
+  });
+
   const triggerDeployMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("POST", "/api/vercel/deployments");
@@ -579,15 +603,56 @@ export default function VercelPage() {
                   Link Project
                 </CardTitle>
                 <CardDescription>
-                  Link your repository to a Vercel project to enable deployments
+                  Automatically link your repository to a Vercel project
                 </CardDescription>
               </CardHeader>
-              <CardContent>
+              <CardContent className="space-y-4">
+                <div className="bg-muted/50 rounded-lg p-4">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                      <Zap className="w-4 h-4 text-primary" />
+                    </div>
+                    <div>
+                      <p className="font-medium">Auto-Link</p>
+                      <p className="text-sm text-muted-foreground">
+                        Automatically find or create a Vercel project for {repoData?.data?.fullName}
+                      </p>
+                    </div>
+                  </div>
+                  <Button 
+                    onClick={() => autoLinkMutation.mutate()}
+                    disabled={autoLinkMutation.isPending}
+                    className="w-full"
+                    data-testid="button-auto-link"
+                  >
+                    {autoLinkMutation.isPending ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                        Finding or creating project...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 mr-2" />
+                        Auto-Link Project
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                <div className="relative">
+                  <div className="absolute inset-0 flex items-center">
+                    <Separator />
+                  </div>
+                  <div className="relative flex justify-center text-xs uppercase">
+                    <span className="bg-background px-2 text-muted-foreground">or choose manually</span>
+                  </div>
+                </div>
+
                 <Dialog open={showProjectDialog} onOpenChange={setShowProjectDialog}>
                   <DialogTrigger asChild>
-                    <Button data-testid="button-link-project">
-                      <Link2 className="w-4 h-4 mr-2" />
-                      Link Project
+                    <Button variant="outline" className="w-full" data-testid="button-link-project-manual">
+                      <Settings className="w-4 h-4 mr-2" />
+                      Manual Selection
                     </Button>
                   </DialogTrigger>
                   <DialogContent>
