@@ -165,28 +165,33 @@ function generatePostContent(post: Omit<Post, "path">, originalFrontmatter?: Rec
     delete frontmatter.heroImage;
   }
   
-  // Handle author - preserve original format if it was an object
+  // Handle author - ALWAYS output as object for Astro compatibility
   const authorValue = typeof post.author === 'string' ? post.author.trim() : post.author;
   if (authorValue && (typeof authorValue !== 'string' || authorValue.length > 0)) {
-    if (typeof authorValue === 'object') {
+    if (typeof authorValue === 'object' && authorValue !== null) {
       // Author is already an object, use as is
       frontmatter.author = authorValue;
     } else if (typeof authorValue === 'string') {
       // Author is a string - check if original was an object
-      if (originalFrontmatter?.author && typeof originalFrontmatter.author === 'object') {
+      if (originalFrontmatter?.author && typeof originalFrontmatter.author === 'object' && originalFrontmatter.author !== null) {
         // Preserve object structure, update name
         frontmatter.author = {
           ...originalFrontmatter.author,
           name: authorValue,
         };
       } else {
-        // Original was string or didn't exist, keep as string
-        frontmatter.author = authorValue;
+        // Original was string or didn't exist - convert to object for Astro
+        frontmatter.author = { name: authorValue };
       }
     }
   } else if (originalFrontmatter?.author) {
     // Keep original author if field was cleared
-    frontmatter.author = originalFrontmatter.author;
+    if (typeof originalFrontmatter.author === 'string') {
+      // Convert string to object
+      frontmatter.author = { name: originalFrontmatter.author };
+    } else {
+      frontmatter.author = originalFrontmatter.author;
+    }
   } else {
     delete frontmatter.author;
   }
