@@ -255,12 +255,42 @@ export const vercelDeploymentSchema = z.object({
 
 export type VercelDeployment = z.infer<typeof vercelDeploymentSchema>;
 
-// Vercel domain schema
+// Vercel DNS record schema
+export const vercelDnsRecordSchema = z.object({
+  type: z.string(),
+  name: z.string(),
+  value: z.string(),
+});
+
+export type VercelDnsRecord = z.infer<typeof vercelDnsRecordSchema>;
+
+// Vercel domain schema with full verification details
 export const vercelDomainSchema = z.object({
   name: z.string(),
   verified: z.boolean(),
   configured: z.boolean().optional(),
   createdAt: z.number().optional(),
+  verification: z.array(z.object({
+    type: z.string(),
+    domain: z.string(),
+    value: z.string(),
+    reason: z.string(),
+  })).optional(),
+  verificationRecord: z.object({
+    type: z.string(),
+    name: z.string(),
+    value: z.string(),
+  }).optional(),
+  txtVerification: z.object({
+    name: z.string(),
+    value: z.string(),
+  }).optional(),
+  configuredBy: z.string().nullable().optional(),
+  apexName: z.string().optional(),
+  gitBranch: z.string().nullable().optional(),
+  redirect: z.string().nullable().optional(),
+  redirectStatusCode: z.number().nullable().optional(),
+  dnsRecords: z.array(vercelDnsRecordSchema).optional(),
 });
 
 export type VercelDomain = z.infer<typeof vercelDomainSchema>;
