@@ -333,7 +333,7 @@ export default function Settings() {
           <CardHeader>
             <CardTitle>Repository Connection</CardTitle>
             <CardDescription>
-              Connect to your Astro blog repository on GitHub
+              Connect to your blog repository on GitHub
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
@@ -513,7 +513,7 @@ export default function Settings() {
                   <Github className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
                   <p className="font-medium mb-1">No Repository Connected</p>
                   <p className="text-sm text-muted-foreground mb-4">
-                    Select your Astro blog repository to get started
+                    Select your blog repository to get started
                   </p>
                 </div>
                 
@@ -613,13 +613,13 @@ export default function Settings() {
 
       <Card>
         <CardHeader>
-          <CardTitle>About Astro CMS</CardTitle>
-          <CardDescription>Content management system for Astro blogs</CardDescription>
+          <CardTitle>About EG Press</CardTitle>
+          <CardDescription>Content management system for your blog</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="space-y-3 text-sm">
             <p>
-              This CMS provides a visual interface for managing your Astro blog content 
+              This CMS provides a visual interface for managing your blog content 
               with full GitHub integration.
             </p>
             <div className="flex flex-wrap gap-2">

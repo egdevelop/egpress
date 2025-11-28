@@ -40,9 +40,9 @@ export default function Login() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 mb-4">
             <Rocket className="w-8 h-8 text-primary" />
           </div>
-          <h1 className="text-3xl font-bold" data-testid="text-login-title">Astro Blog CMS</h1>
+          <h1 className="text-3xl font-bold" data-testid="text-login-title">EG Press</h1>
           <p className="text-muted-foreground">
-            Content Management System for Astro blogs
+            Content Management System for your blog
           </p>
         </div>
 

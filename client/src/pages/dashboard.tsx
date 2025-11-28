@@ -154,8 +154,8 @@ export default function Dashboard() {
             </div>
             <h2 className="text-xl font-semibold mb-2">No Repository Connected</h2>
             <p className="text-muted-foreground max-w-md mb-6">
-              Connect your Astro blog repository to start managing your content. 
-              Enter the repository URL in the sidebar to get started.
+              Connect your blog repository to start managing your content. 
+              Go to Settings to get started.
             </p>
             <Badge variant="outline">
               Waiting for repository connection...

@@ -1,4 +1,4 @@
-# Design Guidelines for Astro Blog CMS
+# Design Guidelines for EG Press
 
 ## Design Approach
 **Reference-Based Approach**: Drawing from Netlify CMS and TinaCMS Git-based interfaces, focusing on productivity-oriented content management with clear information hierarchy and efficient workflows.

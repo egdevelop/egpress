@@ -1,10 +1,10 @@
-# Astro Blog CMS
+# EG Press
 
-A web-based Content Management System for managing Astro blog templates with GitHub integration.
+A web-based Content Management System for managing blog templates with GitHub integration.
 
 ## Overview
 
-This CMS provides a visual interface for managing Astro blog content directly from GitHub repositories. It features:
+This CMS provides a visual interface for managing blog content directly from GitHub repositories. It features:
 
 - **CRUD Operations**: Create, read, update, and delete blog posts
 - **GitHub Integration**: Connect to any GitHub repository and sync changes
