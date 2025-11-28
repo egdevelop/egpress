@@ -131,7 +131,10 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 - `POST /api/ai/validate-key` - Validate Gemini API key
 
 ### Clone Repository
-- `POST /api/clone-repo` - Clone current repo to new repository
+- `POST /api/clone-repo` - Clone source repo to new repository
+
+### GitHub Repositories
+- `GET /api/github/repos` - List user's GitHub repositories (paginated)
 
 ### GitHub
 - `GET /api/github/status` - Check GitHub connection
