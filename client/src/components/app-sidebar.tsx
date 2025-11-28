@@ -171,7 +171,7 @@ export function AppSidebar() {
             <span className="text-primary-foreground font-bold text-sm">A</span>
           </div>
           <div>
-            <h1 className="font-semibold text-sm">Astro CMS</h1>
+            <h1 className="font-semibold text-sm">EG Press</h1>
             <p className="text-xs text-muted-foreground">Content Manager</p>
           </div>
         </div>
@@ -237,7 +237,6 @@ export function AppSidebar() {
           </form>
         )}
       </SidebarHeader>
-
       <SidebarContent>
         <SidebarGroup>
           <SidebarGroupLabel>Content</SidebarGroupLabel>
@@ -315,7 +314,6 @@ export function AppSidebar() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-
       <SidebarFooter className="p-4 border-t border-sidebar-border">
         {repository?.lastSynced && (
           <p className="text-xs text-muted-foreground text-center">
