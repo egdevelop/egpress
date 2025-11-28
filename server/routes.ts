@@ -976,22 +976,111 @@ export async function registerRoutes(
     }
   });
 
-  // Get theme settings
+  // Get theme settings - reads from repository's theme.json file
   app.get("/api/theme", async (req, res) => {
     try {
-      let theme = await storage.getTheme();
-      if (!theme) {
-        theme = {
-          primary: "#FF5D01",
-          secondary: "#0C0C0C",
-          background: "#FAFAFA",
-          text: "#1E293B",
-          accent: "#8B5CF6",
-          success: "#10B981",
-        };
+      const repo = await storage.getRepository();
+      
+      // Default theme
+      const defaultTheme = {
+        primary: "#FF5D01",
+        secondary: "#0C0C0C",
+        background: "#FAFAFA",
+        text: "#1E293B",
+        accent: "#8B5CF6",
+        success: "#10B981",
+      };
+
+      if (!repo) {
+        return res.json({ success: true, data: defaultTheme });
       }
-      res.json({ success: true, data: theme });
+
+      // Try to read from repository's theme.json file
+      try {
+        const octokit = await getGitHubClient();
+        const { data } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/config/theme.json",
+          ref: repo.activeBranch,
+        });
+
+        if (!Array.isArray(data) && "content" in data) {
+          const content = Buffer.from(data.content, "base64").toString("utf-8");
+          const theme = JSON.parse(content);
+          // Merge with defaults to ensure all keys exist
+          res.json({ success: true, data: { ...defaultTheme, ...theme } });
+          return;
+        }
+      } catch (err) {
+        // File doesn't exist in repo, try reading from CSS variables
+        console.log("theme.json not found, trying to read from CSS...");
+      }
+
+      // Try to read colors from global.css or styles/global.css
+      try {
+        const octokit = await getGitHubClient();
+        
+        // Try different possible CSS file locations
+        const cssFiles = [
+          "src/styles/global.css",
+          "src/styles/base.css",
+          "src/css/global.css",
+          "src/global.css",
+        ];
+
+        for (const cssPath of cssFiles) {
+          try {
+            const { data } = await octokit.repos.getContent({
+              owner: repo.owner,
+              repo: repo.name,
+              path: cssPath,
+              ref: repo.activeBranch,
+            });
+
+            if (!Array.isArray(data) && "content" in data) {
+              const cssContent = Buffer.from(data.content, "base64").toString("utf-8");
+              
+              // Parse CSS custom properties for colors
+              const extractedTheme = { ...defaultTheme };
+              
+              // Match --color-primary, --primary, --accent-color etc.
+              const colorPatterns = [
+                { pattern: /--(?:color-)?primary\s*:\s*([^;]+)/i, key: "primary" },
+                { pattern: /--(?:color-)?secondary\s*:\s*([^;]+)/i, key: "secondary" },
+                { pattern: /--(?:color-)?background\s*:\s*([^;]+)/i, key: "background" },
+                { pattern: /--(?:color-)?text\s*:\s*([^;]+)/i, key: "text" },
+                { pattern: /--(?:color-)?accent\s*:\s*([^;]+)/i, key: "accent" },
+                { pattern: /--(?:color-)?success\s*:\s*([^;]+)/i, key: "success" },
+              ];
+
+              for (const { pattern, key } of colorPatterns) {
+                const match = cssContent.match(pattern);
+                if (match && match[1]) {
+                  const value = match[1].trim();
+                  // Only use if it looks like a valid color (hex, rgb, etc.)
+                  if (value.startsWith("#") || value.startsWith("rgb") || value.startsWith("hsl")) {
+                    (extractedTheme as any)[key] = value;
+                  }
+                }
+              }
+
+              res.json({ success: true, data: extractedTheme, source: cssPath });
+              return;
+            }
+          } catch {
+            // Try next file
+          }
+        }
+      } catch (err) {
+        console.log("Could not read CSS files:", err);
+      }
+
+      // Fall back to storage
+      let theme = await storage.getTheme();
+      res.json({ success: true, data: theme || defaultTheme });
     } catch (error) {
+      console.error("Get theme error:", error);
       res.json({ success: false, error: "Failed to get theme" });
     }
   });
