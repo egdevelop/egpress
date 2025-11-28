@@ -207,72 +207,107 @@ export class VercelService {
     };
   }
 
+  async getDomainConfig(domain: string): Promise<{
+    misconfigured: boolean;
+    configuredBy: string | null;
+    recommendedIPv4: { rank: number; value: string[] }[];
+    recommendedCNAME: { rank: number; value: string }[];
+  } | null> {
+    try {
+      const data = await this.request<any>(`/v6/domains/${encodeURIComponent(domain)}/config`);
+      return {
+        misconfigured: data.misconfigured ?? true,
+        configuredBy: data.configuredBy || null,
+        recommendedIPv4: data.recommendedIPv4 || [],
+        recommendedCNAME: data.recommendedCNAME || [],
+      };
+    } catch (error) {
+      console.error(`[Vercel API] getDomainConfig error for ${domain}:`, error);
+      return null;
+    }
+  }
+
   async getDomains(projectId: string): Promise<VercelDomain[]> {
     const data = await this.request<{ domains: any[] }>(
       `/v9/projects/${encodeURIComponent(projectId)}/domains`
     );
 
-    console.log('[Vercel API] getDomains raw response:', JSON.stringify(data.domains, null, 2));
-
-    return (data.domains || []).map((d: any) => {
-      const dnsRecords: { type: string; name: string; value: string }[] = [];
-      
-      const hasVerificationChallenges = d.verification && Array.isArray(d.verification) && d.verification.length > 0;
-      
-      if (hasVerificationChallenges) {
-        for (const v of d.verification) {
-          if (v.type && v.value) {
+    const domainsWithConfig = await Promise.all(
+      (data.domains || []).map(async (d: any) => {
+        const config = await this.getDomainConfig(d.name);
+        
+        const dnsRecords: { type: string; name: string; value: string }[] = [];
+        
+        if (config) {
+          const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
+          if (preferredIPv4 && preferredIPv4.value.length > 0) {
+            for (const ip of preferredIPv4.value) {
+              dnsRecords.push({
+                type: "A",
+                name: "@",
+                value: ip,
+              });
+            }
+          }
+          
+          const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
+          if (preferredCNAME) {
+            const parts = d.name.split(".");
+            const isApex = parts.length === 2;
             dnsRecords.push({
-              type: v.type,
-              name: v.domain || "@",
-              value: v.value,
+              type: "CNAME",
+              name: isApex ? "www" : parts[0],
+              value: preferredCNAME.value,
             });
           }
         }
-      }
-      
-      if (d.cnames && Array.isArray(d.cnames)) {
-        for (const cname of d.cnames) {
-          dnsRecords.push({
-            type: "CNAME",
-            name: cname.hostname || "@",
-            value: cname.value || "cname.vercel-dns.com",
-          });
+        
+        if (d.verification && Array.isArray(d.verification)) {
+          for (const v of d.verification) {
+            if (v.type === "TXT" && v.value) {
+              dnsRecords.push({
+                type: "TXT",
+                name: v.domain || "_vercel",
+                value: v.value,
+              });
+            }
+          }
         }
-      }
-      
-      const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
-      
-      const isConfigured = hasVerificationChallenges ? false : (d.verified === true);
+        
+        const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
+        const isMisconfigured = config?.misconfigured ?? true;
 
-      return {
-        name: d.name,
-        verified: d.verified || false,
-        configured: isConfigured,
-        createdAt: d.createdAt,
-        verification: d.verification?.map((v: any) => ({
-          type: v.type,
-          domain: v.domain,
-          value: v.value,
-          reason: v.reason,
-        })),
-        verificationRecord: d.verification?.[0] ? {
-          type: d.verification[0].type,
-          name: d.verification[0].domain || "_vercel",
-          value: d.verification[0].value,
-        } : undefined,
-        txtVerification: txtRecord ? {
-          name: txtRecord.domain || "_vercel",
-          value: txtRecord.value,
-        } : undefined,
-        configuredBy: d.configuredBy,
-        apexName: d.apexName,
-        gitBranch: d.gitBranch,
-        redirect: d.redirect,
-        redirectStatusCode: d.redirectStatusCode,
-        dnsRecords,
-      };
-    });
+        return {
+          name: d.name,
+          verified: d.verified || false,
+          configured: !isMisconfigured,
+          createdAt: d.createdAt,
+          verification: d.verification?.map((v: any) => ({
+            type: v.type,
+            domain: v.domain,
+            value: v.value,
+            reason: v.reason,
+          })),
+          verificationRecord: d.verification?.[0] ? {
+            type: d.verification[0].type,
+            name: d.verification[0].domain || "_vercel",
+            value: d.verification[0].value,
+          } : undefined,
+          txtVerification: txtRecord ? {
+            name: txtRecord.domain || "_vercel",
+            value: txtRecord.value,
+          } : undefined,
+          configuredBy: config?.configuredBy || d.configuredBy,
+          apexName: d.apexName,
+          gitBranch: d.gitBranch,
+          redirect: d.redirect,
+          redirectStatusCode: d.redirectStatusCode,
+          dnsRecords,
+        };
+      })
+    );
+
+    return domainsWithConfig;
   }
 
   async addDomain(projectId: string, domain: string): Promise<VercelDomain> {
@@ -284,34 +319,52 @@ export class VercelService {
       }
     );
 
+    const config = await this.getDomainConfig(domain);
     const dnsRecords: { type: string; name: string; value: string }[] = [];
+    
+    if (config) {
+      const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
+      if (preferredIPv4 && preferredIPv4.value.length > 0) {
+        for (const ip of preferredIPv4.value) {
+          dnsRecords.push({
+            type: "A",
+            name: "@",
+            value: ip,
+          });
+        }
+      }
+      
+      const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
+      if (preferredCNAME) {
+        const parts = domain.split(".");
+        const isApex = parts.length === 2;
+        dnsRecords.push({
+          type: "CNAME",
+          name: isApex ? "www" : parts[0],
+          value: preferredCNAME.value,
+        });
+      }
+    }
     
     if (d.verification && Array.isArray(d.verification)) {
       for (const v of d.verification) {
-        if (v.type && v.value) {
+        if (v.type === "TXT" && v.value) {
           dnsRecords.push({
-            type: v.type,
-            name: v.domain || domain,
+            type: "TXT",
+            name: v.domain || "_vercel",
             value: v.value,
           });
         }
       }
     }
     
-    if (d.apexName && !dnsRecords.find(r => r.type === "A")) {
-      dnsRecords.push({
-        type: "A",
-        name: "@",
-        value: "76.76.21.21",
-      });
-    }
-    
     const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
+    const isMisconfigured = config?.misconfigured ?? true;
 
     return {
       name: d.name,
       verified: d.verified || false,
-      configured: d.configured !== undefined ? d.configured : !d.misconfigured,
+      configured: !isMisconfigured,
       createdAt: d.createdAt,
       verification: d.verification?.map((v: any) => ({
         type: v.type,
@@ -323,7 +376,7 @@ export class VercelService {
         name: txtRecord.domain || "_vercel",
         value: txtRecord.value,
       } : undefined,
-      configuredBy: d.configuredBy,
+      configuredBy: config?.configuredBy || d.configuredBy,
       apexName: d.apexName,
       dnsRecords,
     };
@@ -342,34 +395,52 @@ export class VercelService {
       { method: "POST" }
     );
 
+    const config = await this.getDomainConfig(domain);
     const dnsRecords: { type: string; name: string; value: string }[] = [];
+    
+    if (config) {
+      const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
+      if (preferredIPv4 && preferredIPv4.value.length > 0) {
+        for (const ip of preferredIPv4.value) {
+          dnsRecords.push({
+            type: "A",
+            name: "@",
+            value: ip,
+          });
+        }
+      }
+      
+      const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
+      if (preferredCNAME) {
+        const parts = domain.split(".");
+        const isApex = parts.length === 2;
+        dnsRecords.push({
+          type: "CNAME",
+          name: isApex ? "www" : parts[0],
+          value: preferredCNAME.value,
+        });
+      }
+    }
     
     if (d.verification && Array.isArray(d.verification)) {
       for (const v of d.verification) {
-        if (v.type && v.value) {
+        if (v.type === "TXT" && v.value) {
           dnsRecords.push({
-            type: v.type,
-            name: v.domain || domain,
+            type: "TXT",
+            name: v.domain || "_vercel",
             value: v.value,
           });
         }
       }
     }
     
-    if (d.apexName && !dnsRecords.find(r => r.type === "A")) {
-      dnsRecords.push({
-        type: "A",
-        name: "@",
-        value: "76.76.21.21",
-      });
-    }
-    
     const txtRecord = d.verification?.find((v: any) => v.type === "TXT");
+    const isMisconfigured = config?.misconfigured ?? true;
 
     return {
       name: d.name,
       verified: d.verified || false,
-      configured: d.configured !== undefined ? d.configured : !d.misconfigured,
+      configured: !isMisconfigured,
       createdAt: d.createdAt,
       verification: d.verification?.map((v: any) => ({
         type: v.type,
@@ -381,7 +452,7 @@ export class VercelService {
         name: txtRecord.domain || "_vercel",
         value: txtRecord.value,
       } : undefined,
-      configuredBy: d.configuredBy,
+      configuredBy: config?.configuredBy || d.configuredBy,
       apexName: d.apexName,
       dnsRecords,
     };
