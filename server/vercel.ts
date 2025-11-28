@@ -262,18 +262,16 @@ export class VercelService {
               });
             }
           } else {
-            // If no A records configured yet, show what to configure
-            const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-            if (preferredIPv4 && preferredIPv4.value.length > 0) {
-              for (const ip of preferredIPv4.value) {
-                dnsRecords.push({
-                  type: "A",
-                  name: "@",
-                  value: ip,
-                  status: "pending",
-                });
-              }
-            }
+            // If no A records configured yet, show new recommended IP
+            // Vercel has expanded their IP range - use new IP instead of legacy 76.76.21.21
+            // See: https://vercel.com/docs/domains/working-with-dns
+            const NEW_VERCEL_IP = "216.198.79.1";
+            dnsRecords.push({
+              type: "A",
+              name: "@",
+              value: NEW_VERCEL_IP,
+              status: "pending",
+            });
           }
           
           const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
@@ -363,18 +361,14 @@ export class VercelService {
           });
         }
       } else {
-        // If no A records configured yet, show what to configure
-        const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-        if (preferredIPv4 && preferredIPv4.value.length > 0) {
-          for (const ip of preferredIPv4.value) {
-            dnsRecords.push({
-              type: "A",
-              name: "@",
-              value: ip,
-              status: "pending",
-            });
-          }
-        }
+        // If no A records configured yet, show new recommended IP
+        const NEW_VERCEL_IP = "216.198.79.1";
+        dnsRecords.push({
+          type: "A",
+          name: "@",
+          value: NEW_VERCEL_IP,
+          status: "pending",
+        });
       }
       
       const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
@@ -456,18 +450,14 @@ export class VercelService {
           });
         }
       } else {
-        // If no A records configured yet, show what to configure
-        const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-        if (preferredIPv4 && preferredIPv4.value.length > 0) {
-          for (const ip of preferredIPv4.value) {
-            dnsRecords.push({
-              type: "A",
-              name: "@",
-              value: ip,
-              status: "pending",
-            });
-          }
-        }
+        // If no A records configured yet, show new recommended IP
+        const NEW_VERCEL_IP = "216.198.79.1";
+        dnsRecords.push({
+          type: "A",
+          name: "@",
+          value: NEW_VERCEL_IP,
+          status: "pending",
+        });
       }
       
       const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
