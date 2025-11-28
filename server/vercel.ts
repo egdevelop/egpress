@@ -263,19 +263,6 @@ export class VercelService {
             }
           }
           
-          // If no A records configured yet, show what to configure
-          const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-          if ((!config.aRecords || config.aRecords.length === 0) && preferredIPv4 && preferredIPv4.value.length > 0) {
-            for (const ip of preferredIPv4.value) {
-              dnsRecords.push({
-                type: "A",
-                name: "@",
-                value: ip,
-                status: "pending",
-              });
-            }
-          }
-          
           const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
           if (preferredCNAME) {
             const parts = d.name.split(".");
@@ -364,19 +351,6 @@ export class VercelService {
         }
       }
       
-      // If no A records configured yet, show what to configure
-      const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-      if ((!config.aRecords || config.aRecords.length === 0) && preferredIPv4 && preferredIPv4.value.length > 0) {
-        for (const ip of preferredIPv4.value) {
-          dnsRecords.push({
-            type: "A",
-            name: "@",
-            value: ip,
-            status: "pending",
-          });
-        }
-      }
-      
       const preferredCNAME = config.recommendedCNAME.find(r => r.rank === 1);
       if (preferredCNAME) {
         const parts = domain.split(".");
@@ -453,19 +427,6 @@ export class VercelService {
             name: "@",
             value: aRecord.value,
             status: "configured",
-          });
-        }
-      }
-      
-      // If no A records configured yet, show what to configure
-      const preferredIPv4 = config.recommendedIPv4.find(r => r.rank === 1);
-      if ((!config.aRecords || config.aRecords.length === 0) && preferredIPv4 && preferredIPv4.value.length > 0) {
-        for (const ip of preferredIPv4.value) {
-          dnsRecords.push({
-            type: "A",
-            name: "@",
-            value: ip,
-            status: "pending",
           });
         }
       }
