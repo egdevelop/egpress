@@ -47,9 +47,12 @@ export const postSchema = z.object({
   pubDate: z.string(),
   heroImage: z.string().optional(),
   author: authorSchema.optional(),
+  category: z.string().optional(),
   tags: z.array(z.string()).optional(),
   draft: z.boolean().optional(),
   content: z.string(),
+  // Store raw frontmatter to preserve original structure
+  rawFrontmatter: z.record(z.any()).optional(),
 });
 
 export type Post = z.infer<typeof postSchema>;

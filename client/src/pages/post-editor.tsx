@@ -60,6 +60,7 @@ const postFormSchema = z.object({
   pubDate: z.string().min(1, "Publication date is required"),
   heroImage: z.string().optional(),
   author: z.string().optional(),
+  category: z.string().optional(),
   tags: z.array(z.string()).optional(),
   draft: z.boolean().optional(),
   content: z.string().min(1, "Content is required"),
@@ -164,6 +165,7 @@ export default function PostEditor() {
       pubDate: new Date().toISOString().split("T")[0],
       heroImage: "",
       author: "",
+      category: "",
       tags: [],
       draft: true,
       content: "# Hello World\n\nStart writing your blog post here...",
@@ -183,6 +185,7 @@ export default function PostEditor() {
         pubDate: post.pubDate.split("T")[0],
         heroImage: post.heroImage || "",
         author: authorName,
+        category: post.category || "",
         tags: post.tags || [],
         draft: post.draft ?? false,
         content: post.content,
@@ -449,6 +452,27 @@ export default function PostEditor() {
                           )}
                         />
                       </div>
+
+                      <FormField
+                        control={form.control}
+                        name="category"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Category</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="e.g. Technology, Tutorial, News"
+                                {...field}
+                                data-testid="input-category"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Category for organizing posts
+                            </FormDescription>
+                            <FormMessage />
+                          </FormItem>
+                        )}
+                      />
 
                       <FormField
                         control={form.control}

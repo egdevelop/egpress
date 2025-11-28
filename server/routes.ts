@@ -112,6 +112,15 @@ function parsePost(path: string, content: string): Post | null {
     const { data, content: markdown } = matter(content);
     const slug = path.split("/").pop()?.replace(/\.(md|mdx)$/, "") || "";
     
+    // Clone only serializable frontmatter fields (avoid gray-matter metadata)
+    const rawFrontmatter: Record<string, any> = {};
+    for (const key of Object.keys(data)) {
+      const val = data[key];
+      // Skip internal gray-matter properties and non-serializable values
+      if (key.startsWith('_') || typeof val === 'function') continue;
+      rawFrontmatter[key] = val;
+    }
+    
     return {
       path,
       slug,
@@ -119,10 +128,13 @@ function parsePost(path: string, content: string): Post | null {
       description: data.description || "",
       pubDate: data.pubDate ? new Date(data.pubDate).toISOString() : new Date().toISOString(),
       heroImage: data.heroImage || "",
-      author: data.author || "",
+      author: data.author || undefined,
+      category: data.category || "",
       tags: Array.isArray(data.tags) ? data.tags : [],
       draft: data.draft === true,
       content: markdown,
+      // Store raw frontmatter to preserve original structure when saving
+      rawFrontmatter,
     };
   } catch {
     return null;
@@ -130,29 +142,82 @@ function parsePost(path: string, content: string): Post | null {
 }
 
 // Generate frontmatter content for a post
-function generatePostContent(post: Omit<Post, "path">): string {
-  const frontmatter: Record<string, any> = {
-    title: post.title,
-    description: post.description || "",
-    pubDate: post.pubDate,
-  };
-
-  if (post.heroImage) frontmatter.heroImage = post.heroImage;
-  if (post.author) frontmatter.author = post.author;
-  if (post.tags && post.tags.length > 0) frontmatter.tags = post.tags;
-  if (post.draft) frontmatter.draft = true;
-
-  const frontmatterStr = Object.entries(frontmatter)
-    .map(([key, value]) => {
-      if (Array.isArray(value)) {
-        return `${key}:\n${value.map(v => `  - "${v}"`).join("\n")}`;
+function generatePostContent(post: Omit<Post, "path">, originalFrontmatter?: Record<string, any>): string {
+  // Start with original frontmatter to preserve any custom fields
+  const frontmatter: Record<string, any> = originalFrontmatter ? { ...originalFrontmatter } : {};
+  
+  // Update with new values from the form (required fields)
+  frontmatter.title = post.title;
+  frontmatter.pubDate = post.pubDate;
+  
+  // Handle description - remove if empty
+  if (post.description && post.description.trim()) {
+    frontmatter.description = post.description;
+  } else {
+    delete frontmatter.description;
+  }
+  
+  // Handle heroImage - remove if empty
+  if (post.heroImage && post.heroImage.trim()) {
+    frontmatter.heroImage = post.heroImage;
+  } else {
+    delete frontmatter.heroImage;
+  }
+  
+  // Handle author - preserve original format if it was an object
+  const authorValue = typeof post.author === 'string' ? post.author.trim() : post.author;
+  if (authorValue && (typeof authorValue !== 'string' || authorValue.length > 0)) {
+    if (typeof authorValue === 'object') {
+      // Author is already an object, use as is
+      frontmatter.author = authorValue;
+    } else if (typeof authorValue === 'string') {
+      // Author is a string - check if original was an object
+      if (originalFrontmatter?.author && typeof originalFrontmatter.author === 'object') {
+        // Preserve object structure, update name
+        frontmatter.author = {
+          ...originalFrontmatter.author,
+          name: authorValue,
+        };
+      } else {
+        // Original was string or didn't exist, keep as string
+        frontmatter.author = authorValue;
       }
-      if (typeof value === "string") {
-        return `${key}: "${value}"`;
-      }
-      return `${key}: ${value}`;
-    })
-    .join("\n");
+    }
+  } else if (originalFrontmatter?.author) {
+    // Keep original author if field was cleared
+    frontmatter.author = originalFrontmatter.author;
+  } else {
+    delete frontmatter.author;
+  }
+  
+  // Handle category (required by some Astro templates) - remove if empty
+  if (post.category && post.category.trim()) {
+    frontmatter.category = post.category;
+  } else if (originalFrontmatter?.category) {
+    // Preserve original category if field was cleared
+    frontmatter.category = originalFrontmatter.category;
+  }
+  
+  // Handle tags - remove if empty array
+  if (post.tags && post.tags.length > 0) {
+    frontmatter.tags = post.tags;
+  } else if (originalFrontmatter?.tags && originalFrontmatter.tags.length > 0) {
+    // Keep original tags if field was cleared
+    frontmatter.tags = originalFrontmatter.tags;
+  } else {
+    delete frontmatter.tags;
+  }
+  
+  // Handle draft - only include if true
+  if (post.draft) {
+    frontmatter.draft = true;
+  } else {
+    delete frontmatter.draft;
+  }
+
+  // Use yaml library for proper formatting
+  const yaml = require('yaml');
+  const frontmatterStr = yaml.stringify(frontmatter).trim();
 
   return `---\n${frontmatterStr}\n---\n\n${post.content}`;
 }
@@ -476,11 +541,11 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const { slug, title, description, pubDate, heroImage, author, tags, draft, content, commitMessage } = req.body;
+      const { slug, title, description, pubDate, heroImage, author, category, tags, draft, content, commitMessage } = req.body;
       
       const path = `src/content/blog/${slug}.md`;
       const fileContent = generatePostContent({
-        slug, title, description, pubDate, heroImage, author, tags, draft, content
+        slug, title, description, pubDate, heroImage, author, category, tags, draft, content
       });
 
       const octokit = await getGitHubClient();
@@ -495,10 +560,26 @@ export async function registerRoutes(
         branch: repo.activeBranch,
       });
 
+      // Build new raw frontmatter for the new post
+      const newRawFrontmatter: Record<string, any> = { title, pubDate };
+      if (description && description.trim()) newRawFrontmatter.description = description;
+      if (heroImage && heroImage.trim()) newRawFrontmatter.heroImage = heroImage;
+      if (author && author.trim()) newRawFrontmatter.author = author;
+      if (category && category.trim()) newRawFrontmatter.category = category;
+      if (tags && tags.length > 0) newRawFrontmatter.tags = tags;
+      if (draft) newRawFrontmatter.draft = true;
+
       const newPost: Post = {
-        path, slug, title, description: description || "", 
-        pubDate, heroImage: heroImage || "", author: author || "",
-        tags: tags || [], draft: draft || false, content
+        path, slug, title, 
+        description: description || "", 
+        pubDate, 
+        heroImage: heroImage || "", 
+        author: author || undefined,
+        category: category || "", 
+        tags: tags || [], 
+        draft: draft || false, 
+        content,
+        rawFrontmatter: newRawFrontmatter,
       };
 
       // Update cache
@@ -526,11 +607,12 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Post not found" });
       }
 
-      const { title, description, pubDate, heroImage, author, tags, draft, content, commitMessage } = req.body;
+      const { title, description, pubDate, heroImage, author, category, tags, draft, content, commitMessage } = req.body;
       
+      // Pass original frontmatter to preserve structure (author as object, custom fields)
       const fileContent = generatePostContent({
-        slug: req.params.slug, title, description, pubDate, heroImage, author, tags, draft, content
-      });
+        slug: req.params.slug, title, description, pubDate, heroImage, author, category, tags, draft, content
+      }, existingPost.rawFrontmatter);
 
       const octokit = await getGitHubClient();
 
@@ -555,11 +637,28 @@ export async function registerRoutes(
         branch: repo.activeBranch,
       });
 
+      // Rebuild rawFrontmatter based on what was actually written
+      // Parse the generated content to get the actual frontmatter
+      const { data: newFrontmatter } = matter(fileContent);
+      const updatedRawFrontmatter: Record<string, any> = {};
+      for (const key of Object.keys(newFrontmatter)) {
+        const val = newFrontmatter[key];
+        if (key.startsWith('_') || typeof val === 'function') continue;
+        updatedRawFrontmatter[key] = val;
+      }
+
       const updatedPost: Post = {
         ...existingPost,
-        title, description: description || "", pubDate,
-        heroImage: heroImage || "", author: author || "",
-        tags: tags || [], draft: draft || false, content
+        title, 
+        description: description || "", 
+        pubDate,
+        heroImage: heroImage || "", 
+        author: newFrontmatter.author || existingPost.author,
+        category: newFrontmatter.category || category || "",
+        tags: newFrontmatter.tags || tags || [], 
+        draft: draft || false, 
+        content,
+        rawFrontmatter: updatedRawFrontmatter,
       };
 
       // Update cache
