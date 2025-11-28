@@ -389,20 +389,43 @@ export async function saveUserSettings(githubToken: string, githubUsername: stri
   const tokenHash = hashToken(githubToken);
   
   try {
-    const { error } = await supabase
+    // First check if user already exists by username
+    const { data: existingUser } = await supabase
       .from('user_settings')
-      .upsert({
-        github_token_hash: tokenHash,
-        github_username: githubUsername,
-        ...settings,
-        updated_at: new Date().toISOString(),
-      }, {
-        onConflict: 'github_token_hash',
-      });
+      .select('id')
+      .eq('github_username', githubUsername)
+      .single();
     
-    if (error) {
-      console.error('Error saving settings to Supabase:', error);
-      return false;
+    if (existingUser) {
+      // Update existing record by username (updates token hash too for fresh OAuth tokens)
+      const { error } = await supabase
+        .from('user_settings')
+        .update({
+          github_token_hash: tokenHash,
+          ...settings,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('github_username', githubUsername);
+      
+      if (error) {
+        console.error('Error updating settings in Supabase:', error);
+        return false;
+      }
+    } else {
+      // Create new record
+      const { error } = await supabase
+        .from('user_settings')
+        .insert({
+          github_token_hash: tokenHash,
+          github_username: githubUsername,
+          ...settings,
+          updated_at: new Date().toISOString(),
+        });
+      
+      if (error) {
+        console.error('Error creating settings in Supabase:', error);
+        return false;
+      }
     }
     
     return true;
@@ -412,12 +435,25 @@ export async function saveUserSettings(githubToken: string, githubUsername: stri
   }
 }
 
-export async function loadUserSettings(githubToken: string): Promise<UserSettings | null> {
+export async function loadUserSettings(githubToken: string, username?: string): Promise<UserSettings | null> {
   if (!supabase) return null;
   
-  const tokenHash = hashToken(githubToken);
-  
   try {
+    // First try to load by username (works for both OAuth and PAT)
+    if (username) {
+      const { data: userDataByUsername, error: usernameError } = await supabase
+        .from('user_settings')
+        .select('*')
+        .eq('github_username', username)
+        .single();
+      
+      if (userDataByUsername && !usernameError) {
+        return userDataByUsername as UserSettings;
+      }
+    }
+    
+    // Fall back to token hash for legacy compatibility
+    const tokenHash = hashToken(githubToken);
     const { data, error } = await supabase
       .from('user_settings')
       .select('*')
@@ -462,20 +498,23 @@ export async function deleteUserSettings(githubToken: string): Promise<boolean> 
   }
 }
 
-// Legacy update functions (kept for backward compatibility)
-export async function updateGeminiKey(githubToken: string, geminiKey: string): Promise<boolean> {
+// Legacy update functions - now use username for lookup (supports OAuth)
+export async function updateGeminiKey(githubToken: string, geminiKey: string, username?: string): Promise<boolean> {
   if (!supabase) return false;
   
-  const tokenHash = hashToken(githubToken);
-  
   try {
+    // Use username if provided, fallback to token hash
+    const filter = username 
+      ? { column: 'github_username', value: username }
+      : { column: 'github_token_hash', value: hashToken(githubToken) };
+    
     const { error } = await supabase
       .from('user_settings')
       .update({ 
         gemini_api_key: geminiKey,
         updated_at: new Date().toISOString(),
       })
-      .eq('github_token_hash', tokenHash);
+      .eq(filter.column, filter.value);
     
     if (error) {
       console.error('Error updating Gemini key:', error);
@@ -489,12 +528,14 @@ export async function updateGeminiKey(githubToken: string, geminiKey: string): P
   }
 }
 
-export async function updateVercelConfig(githubToken: string, vercelToken: string, teamId?: string, projectId?: string): Promise<boolean> {
+export async function updateVercelConfig(githubToken: string, vercelToken: string, teamId?: string, projectId?: string, username?: string): Promise<boolean> {
   if (!supabase) return false;
   
-  const tokenHash = hashToken(githubToken);
-  
   try {
+    const filter = username 
+      ? { column: 'github_username', value: username }
+      : { column: 'github_token_hash', value: hashToken(githubToken) };
+    
     const { error } = await supabase
       .from('user_settings')
       .update({ 
@@ -503,7 +544,7 @@ export async function updateVercelConfig(githubToken: string, vercelToken: strin
         vercel_project_id: projectId || null,
         updated_at: new Date().toISOString(),
       })
-      .eq('github_token_hash', tokenHash);
+      .eq(filter.column, filter.value);
     
     if (error) {
       console.error('Error updating Vercel config:', error);
@@ -521,13 +562,16 @@ export async function updateSearchConsoleConfig(
   githubToken: string, 
   clientEmail: string, 
   privateKey: string, 
-  siteUrl: string
+  siteUrl: string,
+  username?: string
 ): Promise<boolean> {
   if (!supabase) return false;
   
-  const tokenHash = hashToken(githubToken);
-  
   try {
+    const filter = username 
+      ? { column: 'github_username', value: username }
+      : { column: 'github_token_hash', value: hashToken(githubToken) };
+    
     const { error } = await supabase
       .from('user_settings')
       .update({ 
@@ -536,7 +580,7 @@ export async function updateSearchConsoleConfig(
         search_console_site_url: siteUrl,
         updated_at: new Date().toISOString(),
       })
-      .eq('github_token_hash', tokenHash);
+      .eq(filter.column, filter.value);
     
     if (error) {
       console.error('Error updating Search Console config:', error);
@@ -553,13 +597,16 @@ export async function updateSearchConsoleConfig(
 export async function updateAdsenseConfig(
   githubToken: string, 
   publisherId: string,
-  slots: Record<string, string>
+  slots: Record<string, string>,
+  username?: string
 ): Promise<boolean> {
   if (!supabase) return false;
   
-  const tokenHash = hashToken(githubToken);
-  
   try {
+    const filter = username 
+      ? { column: 'github_username', value: username }
+      : { column: 'github_token_hash', value: hashToken(githubToken) };
+    
     const { error } = await supabase
       .from('user_settings')
       .update({ 
@@ -567,7 +614,7 @@ export async function updateAdsenseConfig(
         adsense_slots: slots,
         updated_at: new Date().toISOString(),
       })
-      .eq('github_token_hash', tokenHash);
+      .eq(filter.column, filter.value);
     
     if (error) {
       console.error('Error updating AdSense config:', error);
@@ -581,12 +628,14 @@ export async function updateAdsenseConfig(
   }
 }
 
-export async function clearVercelConfig(githubToken: string): Promise<boolean> {
+export async function clearVercelConfig(githubToken: string, username?: string): Promise<boolean> {
   if (!supabase) return false;
   
-  const tokenHash = hashToken(githubToken);
-  
   try {
+    const filter = username 
+      ? { column: 'github_username', value: username }
+      : { column: 'github_token_hash', value: hashToken(githubToken) };
+    
     const { error } = await supabase
       .from('user_settings')
       .update({ 
@@ -595,7 +644,7 @@ export async function clearVercelConfig(githubToken: string): Promise<boolean> {
         vercel_project_id: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('github_token_hash', tokenHash);
+      .eq(filter.column, filter.value);
     
     if (error) {
       console.error('Error clearing Vercel config:', error);
@@ -609,12 +658,14 @@ export async function clearVercelConfig(githubToken: string): Promise<boolean> {
   }
 }
 
-export async function clearSearchConsoleConfig(githubToken: string): Promise<boolean> {
+export async function clearSearchConsoleConfig(githubToken: string, username?: string): Promise<boolean> {
   if (!supabase) return false;
   
-  const tokenHash = hashToken(githubToken);
-  
   try {
+    const filter = username 
+      ? { column: 'github_username', value: username }
+      : { column: 'github_token_hash', value: hashToken(githubToken) };
+    
     const { error } = await supabase
       .from('user_settings')
       .update({ 
@@ -623,7 +674,7 @@ export async function clearSearchConsoleConfig(githubToken: string): Promise<boo
         search_console_site_url: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('github_token_hash', tokenHash);
+      .eq(filter.column, filter.value);
     
     if (error) {
       console.error('Error clearing Search Console config:', error);

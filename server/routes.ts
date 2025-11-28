@@ -323,8 +323,8 @@ export async function registerRoutes(
         // Set as manual token for GitHub operations
         setManualGitHubToken(token);
         
-        // Load saved settings from Supabase
-        const savedSettings = await loadUserSettings(token);
+        // Load saved settings from Supabase (using username for OAuth compatibility)
+        const savedSettings = await loadUserSettings(token, user.login);
         
         // If there are saved settings, restore them to storage
         if (savedSettings) {
@@ -477,8 +477,8 @@ export async function registerRoutes(
       // Set as manual token for GitHub operations
       setManualGitHubToken(accessToken);
       
-      // Load user settings from Supabase if available
-      const savedSettings = await loadUserSettings(accessToken);
+      // Load user settings from Supabase if available (using username for OAuth compatibility)
+      const savedSettings = await loadUserSettings(accessToken, user.login);
       if (savedSettings) {
         if (savedSettings.gemini_api_key) {
           await storage.setGeminiApiKey(savedSettings.gemini_api_key);
@@ -1954,9 +1954,9 @@ export async function registerRoutes(
       if (save) {
         await storage.setGeminiApiKey(apiKey);
         
-        // Persist to Supabase if user is authenticated
+        // Persist to Supabase if user is authenticated (using username for OAuth compatibility)
         if (req.session.githubToken) {
-          await updateGeminiKey(req.session.githubToken, apiKey);
+          await updateGeminiKey(req.session.githubToken, apiKey, req.session.githubUsername);
         }
       }
       
@@ -1987,8 +1987,8 @@ export async function registerRoutes(
       
       await storage.setGeminiApiKey(apiKey);
       
-      // Persist to Supabase
-      const supabaseResult = await updateGeminiKey(req.session.githubToken!, apiKey);
+      // Persist to Supabase (using username for OAuth compatibility)
+      const supabaseResult = await updateGeminiKey(req.session.githubToken!, apiKey, req.session.githubUsername);
       if (!supabaseResult) {
         console.warn("Failed to persist Gemini key to Supabase");
       }
@@ -2004,8 +2004,8 @@ export async function registerRoutes(
     try {
       await storage.setGeminiApiKey(null);
       
-      // Clear from Supabase
-      const supabaseResult = await updateGeminiKey(req.session.githubToken!, "");
+      // Clear from Supabase (using username for OAuth compatibility)
+      const supabaseResult = await updateGeminiKey(req.session.githubToken!, "", req.session.githubUsername);
       if (!supabaseResult) {
         console.warn("Failed to clear Gemini key from Supabase");
       }
@@ -2073,12 +2073,13 @@ export async function registerRoutes(
           console.warn("Failed to persist Search Console config to Supabase");
         }
       } else {
-        // Fallback to legacy user-based storage
+        // Fallback to legacy user-based storage (using username for OAuth compatibility)
         const supabaseResult = await updateSearchConsoleConfig(
           req.session.githubToken!,
           parsed.client_email,
           parsed.private_key,
-          ""
+          "",
+          req.session.githubUsername
         );
         if (!supabaseResult) {
           console.warn("Failed to persist Search Console config to Supabase (legacy)");
@@ -2106,8 +2107,8 @@ export async function registerRoutes(
           console.warn("Failed to clear Search Console config from Supabase");
         }
       } else {
-        // Fallback to legacy
-        const supabaseResult = await clearSearchConsoleConfig(req.session.githubToken!);
+        // Fallback to legacy (using username for OAuth compatibility)
+        const supabaseResult = await clearSearchConsoleConfig(req.session.githubToken!, req.session.githubUsername);
         if (!supabaseResult) {
           console.warn("Failed to clear Search Console config from Supabase (legacy)");
         }
@@ -2444,8 +2445,8 @@ export async function registerRoutes(
           username: user.username,
         });
         
-        // Persist to Supabase
-        const supabaseResult = await updateVercelConfig(req.session.githubToken!, token, teamId);
+        // Persist to Supabase (using username for OAuth compatibility)
+        const supabaseResult = await updateVercelConfig(req.session.githubToken!, token, teamId, undefined, req.session.githubUsername);
         if (!supabaseResult) {
           console.warn("Failed to persist Vercel config to Supabase");
         }
@@ -2470,8 +2471,8 @@ export async function registerRoutes(
       await storage.setVercelDeployments([]);
       await storage.setVercelDomains([]);
       
-      // Clear from Supabase
-      const supabaseResult = await clearVercelConfig(req.session.githubToken!);
+      // Clear from Supabase (using username for OAuth compatibility)
+      const supabaseResult = await clearVercelConfig(req.session.githubToken!, req.session.githubUsername);
       if (!supabaseResult) {
         console.warn("Failed to clear Vercel config from Supabase");
       }
