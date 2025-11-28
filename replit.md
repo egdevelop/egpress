@@ -134,6 +134,14 @@ This CMS provides a visual interface for managing Astro blog content directly fr
 ### AI Generation
 - `POST /api/ai/generate` - Generate blog post with Gemini AI
 - `POST /api/ai/validate-key` - Validate Gemini API key
+- `GET /api/ai/key` - Get saved Gemini API key
+- `POST /api/ai/key` - Save Gemini API key
+- `DELETE /api/ai/key` - Clear Gemini API key
+
+### Authentication
+- `GET /api/auth/status` - Check authentication status
+- `POST /api/auth/login` - Login with GitHub token
+- `POST /api/auth/logout` - Logout and clear session
 
 ### Clone Repository
 - `POST /api/clone-repo` - Clone source repo to new repository
@@ -206,15 +214,50 @@ This CMS is designed to be self-hosted on any server. Here's how to deploy:
 Set these environment variables for your deployment:
 
 ```bash
-# Required for GitHub integration (create at github.com/settings/tokens/new with 'repo' scope)
-GITHUB_TOKEN=ghp_your_token_here
-
 # Required for session security (generate a random string)
 SESSION_SECRET=your_random_secret_here
 
 # Optional: Port (defaults to 5000)
 PORT=5000
+
+# Optional: Supabase for persistent settings storage
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your-anon-key
 ```
+
+### Supabase Setup (Optional)
+
+For persistent storage of user settings (API keys, tokens), you can configure Supabase:
+
+1. Create a free Supabase project at https://supabase.com
+2. Get your project URL and anon key from Settings > API
+3. Set the environment variables above
+4. Create the `user_settings` table using this SQL:
+
+```sql
+CREATE TABLE user_settings (
+  id SERIAL PRIMARY KEY,
+  github_token_hash VARCHAR(64) UNIQUE NOT NULL,
+  github_username VARCHAR(255) NOT NULL,
+  gemini_api_key TEXT,
+  vercel_token TEXT,
+  vercel_team_id VARCHAR(255),
+  vercel_project_id VARCHAR(255),
+  search_console_client_email TEXT,
+  search_console_private_key TEXT,
+  search_console_site_url TEXT,
+  adsense_publisher_id VARCHAR(255),
+  adsense_slots JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX idx_user_settings_token_hash ON user_settings(github_token_hash);
+```
+
+**Notes**: 
+- Without Supabase, settings are stored in memory and will be lost on restart.
+- This CMS is designed for single-user self-hosting. If multiple users authenticate with different GitHub tokens simultaneously, settings may conflict. For multi-user deployments, consider running separate instances.
 
 ### Build & Run
 

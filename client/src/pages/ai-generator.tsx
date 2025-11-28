@@ -57,10 +57,16 @@ export default function AIGenerator() {
   const [, navigate] = useLocation();
   const [generatedPost, setGeneratedPost] = useState<GeneratedPost | null>(null);
   const [showPreview, setShowPreview] = useState(true);
+  const [keySaved, setKeySaved] = useState(false);
   const { toast } = useToast();
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
+  });
+
+  // Load saved API key
+  const { data: keyData } = useQuery<{ success: boolean; data: { hasKey: boolean; key: string | null } }>({
+    queryKey: ["/api/ai/key"],
   });
 
   const form = useForm<AIFormValues>({
@@ -71,6 +77,49 @@ export default function AIGenerator() {
       keywords: "",
       tone: "professional",
       length: "medium",
+    },
+  });
+
+  // Populate form with saved API key when data loads
+  if (keyData?.data?.key && form.getValues("apiKey") !== keyData.data.key) {
+    form.setValue("apiKey", keyData.data.key);
+    if (!keySaved) setKeySaved(true);
+  }
+
+  // Mutation to save API key
+  const saveKeyMutation = useMutation({
+    mutationFn: async (apiKey: string) => {
+      const response = await apiRequest("POST", "/api/ai/key", { apiKey });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        setKeySaved(true);
+        queryClient.invalidateQueries({ queryKey: ["/api/ai/key"] });
+        toast({
+          title: "API Key Saved",
+          description: "Your Gemini API key has been saved for future sessions",
+        });
+      }
+    },
+  });
+
+  // Mutation to clear API key
+  const clearKeyMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("DELETE", "/api/ai/key");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        setKeySaved(false);
+        form.setValue("apiKey", "");
+        queryClient.invalidateQueries({ queryKey: ["/api/ai/key"] });
+        toast({
+          title: "API Key Cleared",
+          description: "Your Gemini API key has been removed",
+        });
+      }
     },
   });
 
@@ -202,7 +251,7 @@ export default function AIGenerator() {
                     Enter your Google Gemini API key
                   </CardDescription>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-4">
                   <FormField
                     control={form.control}
                     name="apiKey"
@@ -232,6 +281,50 @@ export default function AIGenerator() {
                       </FormItem>
                     )}
                   />
+                  <div className="flex items-center gap-2">
+                    {keySaved ? (
+                      <>
+                        <Badge variant="secondary" className="gap-1">
+                          <Check className="w-3 h-3" />
+                          Key Saved
+                        </Badge>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => clearKeyMutation.mutate()}
+                          disabled={clearKeyMutation.isPending}
+                          data-testid="button-clear-key"
+                        >
+                          <X className="w-4 h-4 mr-1" />
+                          Clear
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          const apiKey = form.getValues("apiKey");
+                          if (apiKey) {
+                            saveKeyMutation.mutate(apiKey);
+                          } else {
+                            toast({
+                              title: "No API Key",
+                              description: "Enter an API key first",
+                              variant: "destructive",
+                            });
+                          }
+                        }}
+                        disabled={saveKeyMutation.isPending || !form.getValues("apiKey")}
+                        data-testid="button-save-key"
+                      >
+                        <Key className="w-4 h-4 mr-1" />
+                        {saveKeyMutation.isPending ? "Saving..." : "Save for Future Sessions"}
+                      </Button>
+                    )}
+                  </div>
                 </CardContent>
               </Card>
 

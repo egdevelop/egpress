@@ -1455,21 +1455,81 @@ export async function registerRoutes(
     }
   });
 
-  // Check if Gemini API key is valid
+  // Check if Gemini API key is valid and optionally save it
   app.post("/api/ai/validate-key", async (req, res) => {
     try {
-      const { apiKey } = req.body;
+      const { apiKey, save } = req.body;
 
       if (!apiKey) {
         return res.json({ success: false, error: "API key is required" });
       }
 
       // Try a simple request to validate the key
-      const result = await generateBlogPost(apiKey, "Test", [], "casual", "short");
+      await generateBlogPost(apiKey, "Test", [], "casual", "short");
+      
+      // Save the key if requested
+      if (save) {
+        await storage.setGeminiApiKey(apiKey);
+        
+        // Persist to Supabase if user is authenticated
+        if (req.session.githubToken) {
+          await updateGeminiKey(req.session.githubToken, apiKey);
+        }
+      }
       
       res.json({ success: true, data: { valid: true } });
     } catch (error: any) {
       res.json({ success: false, error: "Invalid API key" });
+    }
+  });
+
+  // Get saved Gemini API key (protected)
+  app.get("/api/ai/key", requireAuth, async (req, res) => {
+    try {
+      const key = await storage.getGeminiApiKey();
+      res.json({ success: true, data: { hasKey: !!key, key: key || null } });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get API key" });
+    }
+  });
+
+  // Save Gemini API key (protected)
+  app.post("/api/ai/key", requireAuth, async (req, res) => {
+    try {
+      const { apiKey } = req.body;
+      
+      if (!apiKey) {
+        return res.json({ success: false, error: "API key is required" });
+      }
+      
+      await storage.setGeminiApiKey(apiKey);
+      
+      // Persist to Supabase
+      const supabaseResult = await updateGeminiKey(req.session.githubToken!, apiKey);
+      if (!supabaseResult) {
+        console.warn("Failed to persist Gemini key to Supabase");
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to save API key" });
+    }
+  });
+
+  // Clear Gemini API key (protected)
+  app.delete("/api/ai/key", requireAuth, async (req, res) => {
+    try {
+      await storage.setGeminiApiKey(null);
+      
+      // Clear from Supabase
+      const supabaseResult = await updateGeminiKey(req.session.githubToken!, "");
+      if (!supabaseResult) {
+        console.warn("Failed to clear Gemini key from Supabase");
+      }
+      
+      res.json({ success: true });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to clear API key" });
     }
   });
 
@@ -1491,8 +1551,8 @@ export async function registerRoutes(
     }
   });
 
-  // Save Search Console credentials
-  app.post("/api/search-console/credentials", async (req, res) => {
+  // Save Search Console credentials (protected)
+  app.post("/api/search-console/credentials", requireAuth, async (req, res) => {
     try {
       const { siteUrl, serviceAccountJson } = req.body;
 
@@ -1501,8 +1561,9 @@ export async function registerRoutes(
       }
 
       // Validate JSON format
+      let parsed;
       try {
-        const parsed = JSON.parse(serviceAccountJson);
+        parsed = JSON.parse(serviceAccountJson);
         if (!parsed.type || !parsed.private_key || !parsed.client_email) {
           return res.json({ success: false, error: "Invalid service account JSON format" });
         }
@@ -1513,7 +1574,20 @@ export async function registerRoutes(
       await storage.setSearchConsoleConfig({
         siteUrl,
         serviceAccountJson,
+        clientEmail: parsed.client_email,
+        privateKey: parsed.private_key,
       });
+
+      // Persist to Supabase
+      const supabaseResult = await updateSearchConsoleConfig(
+        req.session.githubToken!,
+        parsed.client_email,
+        parsed.private_key,
+        siteUrl
+      );
+      if (!supabaseResult) {
+        console.warn("Failed to persist Search Console config to Supabase");
+      }
 
       res.json({ success: true });
     } catch (error: any) {
@@ -1522,11 +1596,18 @@ export async function registerRoutes(
     }
   });
 
-  // Clear Search Console credentials
-  app.delete("/api/search-console/credentials", async (req, res) => {
+  // Clear Search Console credentials (protected)
+  app.delete("/api/search-console/credentials", requireAuth, async (req, res) => {
     try {
       await storage.setSearchConsoleConfig(null);
       await storage.setIndexingStatus([]);
+      
+      // Clear from Supabase
+      const supabaseResult = await clearSearchConsoleConfig(req.session.githubToken!);
+      if (!supabaseResult) {
+        console.warn("Failed to clear Search Console config from Supabase");
+      }
+      
       res.json({ success: true });
     } catch (error) {
       res.json({ success: false, error: "Failed to clear credentials" });
@@ -1633,8 +1714,8 @@ export async function registerRoutes(
     }
   });
 
-  // Save Vercel token
-  app.post("/api/vercel/token", async (req, res) => {
+  // Save Vercel token (protected)
+  app.post("/api/vercel/token", requireAuth, async (req, res) => {
     try {
       const { token, teamId } = req.body;
       if (!token) {
@@ -1652,6 +1733,13 @@ export async function registerRoutes(
           teamId,
           username: user.username,
         });
+        
+        // Persist to Supabase
+        const supabaseResult = await updateVercelConfig(req.session.githubToken!, token, teamId);
+        if (!supabaseResult) {
+          console.warn("Failed to persist Vercel config to Supabase");
+        }
+        
         res.json({
           success: true,
           data: { username: user.username, email: user.email },
@@ -1664,13 +1752,20 @@ export async function registerRoutes(
     }
   });
 
-  // Clear Vercel token
-  app.delete("/api/vercel/token", async (_req, res) => {
+  // Clear Vercel token (protected)
+  app.delete("/api/vercel/token", requireAuth, async (req, res) => {
     try {
       await storage.setVercelConfig(null);
       await storage.setVercelProject(null);
       await storage.setVercelDeployments([]);
       await storage.setVercelDomains([]);
+      
+      // Clear from Supabase
+      const supabaseResult = await clearVercelConfig(req.session.githubToken!);
+      if (!supabaseResult) {
+        console.warn("Failed to clear Vercel config from Supabase");
+      }
+      
       res.json({ success: true });
     } catch (error: any) {
       res.json({ success: false, error: error.message });

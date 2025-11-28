@@ -1,4 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
+import crypto from 'node:crypto';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseKey = process.env.SUPABASE_ANON_KEY;
@@ -28,7 +29,6 @@ export interface UserSettings {
 }
 
 function hashToken(token: string): string {
-  const crypto = require('crypto');
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
