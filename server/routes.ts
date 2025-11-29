@@ -1767,95 +1767,163 @@ export async function registerRoutes(
   // ============== SITE SETTINGS (New Template) ==============
   // For template-egpress-v1 which uses src/config/siteSettings.ts
 
-  // Extract design token colors from siteSettings.ts using line-by-line parsing
-  // This is more robust than trying to parse the whole object
-  function extractDesignTokenColors(content: string): Record<string, any> {
-    const colors: Record<string, any> = {
-      text: {}
-    };
+  // Helper to extract the value from any AST node
+  function extractNodeValue(node: any): any {
+    if (!node) return undefined;
     
-    // Find the colors section within designTokens
-    const colorsSectionMatch = content.match(/colors:\s*\{([\s\S]*?)\n\s{2,4}\}/);
-    if (!colorsSectionMatch) {
-      return colors;
+    if (node.isKind(SyntaxKind.StringLiteral)) {
+      return node.getLiteralText();
     }
-    
-    const colorsSection = colorsSectionMatch[1];
-    
-    // Extract simple color properties (e.g., primary: '#E11D48',)
-    const simpleColorRegex = /(\w+):\s*['"]([^'"]+)['"]/g;
-    let match;
-    
-    while ((match = simpleColorRegex.exec(colorsSection)) !== null) {
-      const [, key, value] = match;
-      // Skip text sub-properties (they're handled separately)
-      if (['primary', 'secondary', 'muted', 'inverse'].includes(key)) {
-        // Check if we're inside the text object by looking at context
-        const beforeMatch = colorsSection.substring(0, match.index);
-        if (beforeMatch.includes('text:') && !beforeMatch.includes('}', beforeMatch.lastIndexOf('text:'))) {
-          colors.text[key] = value;
-          continue;
+    if (node.isKind(SyntaxKind.NumericLiteral)) {
+      return node.getLiteralValue();
+    }
+    if (node.isKind(SyntaxKind.TrueKeyword)) {
+      return true;
+    }
+    if (node.isKind(SyntaxKind.FalseKeyword)) {
+      return false;
+    }
+    if (node.isKind(SyntaxKind.ObjectLiteralExpression)) {
+      const result: Record<string, any> = {};
+      const properties = node.getProperties();
+      for (const prop of properties) {
+        if (prop.isKind(SyntaxKind.PropertyAssignment)) {
+          const name = prop.getName();
+          const value = extractNodeValue(prop.getInitializer());
+          if (value !== undefined) {
+            result[name] = value;
+          }
         }
       }
-      colors[key] = value;
+      return result;
+    }
+    if (node.isKind(SyntaxKind.ArrayLiteralExpression)) {
+      const elements = node.getElements();
+      return elements.map((el: any) => extractNodeValue(el));
     }
     
-    return colors;
+    return undefined;
   }
 
-  // Extract site settings from siteSettings.ts
-  function extractSiteSettings(content: string): Record<string, any> {
-    const settings: Record<string, any> = {
-      logo: {},
-      seo: {},
-      social: {},
-      contact: {},
-      features: {}
-    };
+  // Helper to unwrap type assertions for parsing (satisfies, as, parenthesized)
+  function unwrapForParsing(node: any): any {
+    if (!node) return null;
     
-    // Extract siteSettings section
-    const siteSettingsMatch = content.match(/siteSettings:\s*\{([\s\S]*?)\n\s{2}\}/);
-    if (!siteSettingsMatch) {
-      return settings;
+    if (node.isKind && node.isKind(SyntaxKind.SatisfiesExpression)) {
+      return unwrapForParsing(node.getExpression());
+    }
+    if (node.isKind && node.isKind(SyntaxKind.AsExpression)) {
+      return unwrapForParsing(node.getExpression());
+    }
+    if (node.isKind && node.isKind(SyntaxKind.ParenthesizedExpression)) {
+      return unwrapForParsing(node.getExpression());
     }
     
-    const siteSettingsSection = siteSettingsMatch[1];
-    
-    // Extract string values
-    const stringRegex = /(\w+):\s*['"]([^'"]*)['"]/g;
-    let match;
-    
-    while ((match = stringRegex.exec(siteSettingsSection)) !== null) {
-      const [, key, value] = match;
-      settings[key] = value;
-    }
-    
-    // Extract boolean values
-    const boolRegex = /(\w+):\s*(true|false)/g;
-    while ((match = boolRegex.exec(siteSettingsSection)) !== null) {
-      const [, key, value] = match;
-      settings[key] = value === 'true';
-    }
-    
-    // Extract number values
-    const numRegex = /(\w+):\s*(\d+)/g;
-    while ((match = numRegex.exec(siteSettingsSection)) !== null) {
-      const [, key, value] = match;
-      settings[key] = parseInt(value, 10);
-    }
-    
-    return settings;
+    return node;
   }
 
-  // Build the full parsed structure from siteSettings.ts
+  // Get root config object for parsing (handles factory-wrapped exports with satisfies)
+  function getRootConfigForParsing(sourceFile: any): ObjectLiteralExpression | null {
+    const exportDefault = sourceFile.getStatements().find(
+      (s: any) => s.isKind(SyntaxKind.ExportAssignment)
+    );
+    if (!exportDefault) return null;
+    
+    let exportExpr = unwrapForParsing(exportDefault.getExpression());
+    
+    // Handle plain object export: export default { ... }
+    if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+      return exportExpr as ObjectLiteralExpression;
+    }
+    
+    // Handle factory-wrapped export: export default defineSiteConfig(...)
+    if (exportExpr?.isKind(SyntaxKind.CallExpression)) {
+      const args = exportExpr.getArguments();
+      for (const arg of args) {
+        const unwrappedArg = unwrapForParsing(arg);
+        
+        // Direct object argument: factory({ ... })
+        if (unwrappedArg?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+          return unwrappedArg as ObjectLiteralExpression;
+        }
+        
+        // Arrow function argument: factory(() => ({ ... })) or factory(() => ({ ... }) satisfies Type)
+        if (unwrappedArg?.isKind(SyntaxKind.ArrowFunction)) {
+          let body = unwrappedArg.getBody();
+          body = unwrapForParsing(body);
+          
+          if (body?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return body as ObjectLiteralExpression;
+          }
+          
+          // Block body with return statement
+          if (body?.isKind(SyntaxKind.Block)) {
+            const returnStmt = body.getStatements().find(
+              (s: any) => s.isKind(SyntaxKind.ReturnStatement)
+            );
+            if (returnStmt) {
+              const returnExpr = unwrapForParsing(returnStmt.getExpression());
+              if (returnExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+                return returnExpr as ObjectLiteralExpression;
+              }
+            }
+          }
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  // AST-based parsing of siteSettings.ts using ts-morph
   function parseSiteSettingsTS(content: string): any {
     try {
-      const designTokenColors = extractDesignTokenColors(content);
-      const siteSettings = extractSiteSettings(content);
+      const project = new Project({ useInMemoryFileSystem: true });
+      const sourceFile = project.createSourceFile('temp.ts', content);
+      
+      const rootObj = getRootConfigForParsing(sourceFile);
+      if (!rootObj) {
+        console.error("Could not find root config object in siteSettings.ts");
+        return null;
+      }
+      
+      // Extract designTokens.colors
+      const designTokensProp = findProperty(rootObj, 'designTokens');
+      let colors: Record<string, any> = { text: {} };
+      
+      if (designTokensProp) {
+        const designTokensObj = designTokensProp.getInitializer();
+        if (designTokensObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+          const colorsProp = findProperty(designTokensObj as ObjectLiteralExpression, 'colors');
+          if (colorsProp) {
+            const colorsValue = extractNodeValue(colorsProp.getInitializer());
+            if (colorsValue && typeof colorsValue === 'object') {
+              colors = colorsValue;
+            }
+          }
+        }
+      }
+      
+      // Extract siteSettings
+      const siteSettingsProp = findProperty(rootObj, 'siteSettings');
+      let siteSettings: Record<string, any> = {
+        logo: {},
+        seo: {},
+        social: {},
+        contact: {},
+        features: {}
+      };
+      
+      if (siteSettingsProp) {
+        const siteSettingsValue = extractNodeValue(siteSettingsProp.getInitializer());
+        if (siteSettingsValue && typeof siteSettingsValue === 'object') {
+          siteSettings = { ...siteSettings, ...siteSettingsValue };
+        }
+      }
       
       return {
         designTokens: {
-          colors: designTokenColors
+          colors
         },
         siteSettings
       };
