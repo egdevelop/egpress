@@ -3224,7 +3224,7 @@ export async function registerRoutes(
     }
   });
 
-  // Trigger new deployment
+  // Trigger new deployment by pushing to GitHub (triggers Vercel webhook)
   app.post("/api/vercel/deployments", async (_req, res) => {
     try {
       const config = await storage.getVercelConfig();
@@ -3241,27 +3241,66 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const { VercelService } = await import("./vercel");
-      const vercel = new VercelService(config.token, config.teamId);
+      // Push an empty commit to trigger Vercel deployment via webhook
+      const octokit = await getGitHubClient();
+      const branch = repo.activeBranch || "main";
       
-      const deployment = await vercel.triggerDeployment(project.name, {
+      // Get the latest commit SHA
+      const { data: refData } = await octokit.git.getRef({
         owner: repo.owner,
         repo: repo.name,
-        branch: repo.activeBranch,
+        ref: `heads/${branch}`,
+      });
+      const latestCommitSha = refData.object.sha;
+      
+      // Get the tree from latest commit
+      const { data: commitData } = await octokit.git.getCommit({
+        owner: repo.owner,
+        repo: repo.name,
+        commit_sha: latestCommitSha,
       });
       
+      // Create a new commit with the same tree (empty commit to trigger deploy)
+      const { data: newCommit } = await octokit.git.createCommit({
+        owner: repo.owner,
+        repo: repo.name,
+        message: `Deploy to Vercel - ${new Date().toISOString()}`,
+        tree: commitData.tree.sha,
+        parents: [latestCommitSha],
+      });
+      
+      // Update the branch reference to the new commit
+      await octokit.git.updateRef({
+        owner: repo.owner,
+        repo: repo.name,
+        ref: `heads/${branch}`,
+        sha: newCommit.sha,
+      });
+      
+      console.log(`Pushed deploy commit to ${repo.fullName}:${branch}`);
+      
+      // Wait a moment for Vercel to pick up the webhook
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      
       // Refresh deployments list
+      const { VercelService } = await import("./vercel");
+      const vercel = new VercelService(config.token, config.teamId);
       const deployments = await vercel.getDeployments(project.id);
       await storage.setVercelDeployments(deployments);
       
-      res.json({ success: true, data: deployment });
+      // Return the latest deployment if available
+      const latestDeployment = deployments[0] || {
+        id: newCommit.sha,
+        url: "",
+        state: "QUEUED",
+        createdAt: Date.now(),
+        source: "git",
+      };
+      
+      res.json({ success: true, data: latestDeployment });
     } catch (error: any) {
-      // Provide more helpful error messages
-      let errorMessage = error.message;
-      if (error.message?.includes("GitHub repository can't be found")) {
-        errorMessage = "Vercel tidak punya akses ke repo ini. Buka GitHub Settings > Applications > Vercel, lalu tambahkan repo ini ke daftar akses.";
-      }
-      res.json({ success: false, error: errorMessage });
+      console.error("Deploy error:", error);
+      res.json({ success: false, error: error.message || "Failed to trigger deployment" });
     }
   });
 
