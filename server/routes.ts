@@ -1822,10 +1822,28 @@ export async function registerRoutes(
     return node;
   }
 
+  // Helper to find a variable declaration by name in the source file
+  function findVariableDeclaration(sourceFile: any, varName: string): any {
+    const variableStatements = sourceFile.getStatements().filter(
+      (s: any) => s.isKind(SyntaxKind.VariableStatement)
+    );
+    
+    for (const stmt of variableStatements) {
+      const declarations = stmt.getDeclarationList()?.getDeclarations() || [];
+      for (const decl of declarations) {
+        if (decl.getName() === varName) {
+          return decl;
+        }
+      }
+    }
+    return null;
+  }
+
   // Get root config object for parsing (handles factory-wrapped exports with satisfies)
   // Also handles named exports like: export const siteConfig = {...}
+  // And handles: export default siteConfig (reference to a variable)
   function getRootConfigForParsing(sourceFile: any): ObjectLiteralExpression | null {
-    // First try: export default {...} or export default factory(...)
+    // First try: export default {...} or export default factory(...) or export default variableName
     const exportDefault = sourceFile.getStatements().find(
       (s: any) => s.isKind(SyntaxKind.ExportAssignment)
     );
@@ -1836,6 +1854,19 @@ export async function registerRoutes(
       // Handle plain object export: export default { ... }
       if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
         return exportExpr as ObjectLiteralExpression;
+      }
+      
+      // Handle export default variableName (reference to a variable)
+      if (exportExpr?.isKind(SyntaxKind.Identifier)) {
+        const varName = exportExpr.getText();
+        const varDecl = findVariableDeclaration(sourceFile, varName);
+        if (varDecl) {
+          let initializer = varDecl.getInitializer();
+          initializer = unwrapForParsing(initializer);
+          if (initializer?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return initializer as ObjectLiteralExpression;
+          }
+        }
       }
       
       // Handle factory-wrapped export: export default defineSiteConfig(...)
@@ -2070,8 +2101,25 @@ export async function registerRoutes(
   // Helper to extract the root config object from various export patterns
   // Handles: export default { ... }, export default factory(() => ({ ... })), 
   // export default factory(() => ({ ... }) satisfies Type), etc.
+  // Helper to find a variable declaration by name (for update functions)
+  function findVarDeclaration(sourceFile: any, varName: string): any {
+    const variableStatements = sourceFile.getStatements().filter(
+      (s: any) => s.isKind(SyntaxKind.VariableStatement)
+    );
+    
+    for (const stmt of variableStatements) {
+      const declarations = stmt.getDeclarationList()?.getDeclarations() || [];
+      for (const decl of declarations) {
+        if (decl.getName() === varName) {
+          return decl;
+        }
+      }
+    }
+    return null;
+  }
+
   function getRootConfigObject(sourceFile: any): ObjectLiteralExpression | null {
-    // First try: export default {...} or export default factory(...)
+    // First try: export default {...} or export default factory(...) or export default variableName
     const exportDefault = sourceFile.getStatements().find(
       (s: any) => s.isKind(SyntaxKind.ExportAssignment)
     );
@@ -2082,6 +2130,19 @@ export async function registerRoutes(
       // Handle plain object export: export default { ... }
       if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
         return exportExpr as ObjectLiteralExpression;
+      }
+      
+      // Handle export default variableName (reference to a variable)
+      if (exportExpr?.isKind(SyntaxKind.Identifier)) {
+        const varName = exportExpr.getText();
+        const varDecl = findVarDeclaration(sourceFile, varName);
+        if (varDecl) {
+          let initializer = varDecl.getInitializer();
+          initializer = unwrapTypeAssertions(initializer);
+          if (initializer?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return initializer as ObjectLiteralExpression;
+          }
+        }
       }
       
       // Handle factory-wrapped export: export default defineSiteConfig(() => ({ ... }))
