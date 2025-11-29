@@ -1766,119 +1766,228 @@ export async function registerRoutes(
   // ============== SITE SETTINGS (New Template) ==============
   // For template-egpress-v1 which uses src/config/siteSettings.ts
 
-  // Helper function to parse TypeScript siteSettings.ts into JSON
+  // Extract design token colors from siteSettings.ts using line-by-line parsing
+  // This is more robust than trying to parse the whole object
+  function extractDesignTokenColors(content: string): Record<string, any> {
+    const colors: Record<string, any> = {
+      text: {}
+    };
+    
+    // Find the colors section within designTokens
+    const colorsSectionMatch = content.match(/colors:\s*\{([\s\S]*?)\n\s{2,4}\}/);
+    if (!colorsSectionMatch) {
+      return colors;
+    }
+    
+    const colorsSection = colorsSectionMatch[1];
+    
+    // Extract simple color properties (e.g., primary: '#E11D48',)
+    const simpleColorRegex = /(\w+):\s*['"]([^'"]+)['"]/g;
+    let match;
+    
+    while ((match = simpleColorRegex.exec(colorsSection)) !== null) {
+      const [, key, value] = match;
+      // Skip text sub-properties (they're handled separately)
+      if (['primary', 'secondary', 'muted', 'inverse'].includes(key)) {
+        // Check if we're inside the text object by looking at context
+        const beforeMatch = colorsSection.substring(0, match.index);
+        if (beforeMatch.includes('text:') && !beforeMatch.includes('}', beforeMatch.lastIndexOf('text:'))) {
+          colors.text[key] = value;
+          continue;
+        }
+      }
+      colors[key] = value;
+    }
+    
+    return colors;
+  }
+
+  // Extract site settings from siteSettings.ts
+  function extractSiteSettings(content: string): Record<string, any> {
+    const settings: Record<string, any> = {
+      logo: {},
+      seo: {},
+      social: {},
+      contact: {},
+      features: {}
+    };
+    
+    // Extract siteSettings section
+    const siteSettingsMatch = content.match(/siteSettings:\s*\{([\s\S]*?)\n\s{2}\}/);
+    if (!siteSettingsMatch) {
+      return settings;
+    }
+    
+    const siteSettingsSection = siteSettingsMatch[1];
+    
+    // Extract string values
+    const stringRegex = /(\w+):\s*['"]([^'"]*)['"]/g;
+    let match;
+    
+    while ((match = stringRegex.exec(siteSettingsSection)) !== null) {
+      const [, key, value] = match;
+      settings[key] = value;
+    }
+    
+    // Extract boolean values
+    const boolRegex = /(\w+):\s*(true|false)/g;
+    while ((match = boolRegex.exec(siteSettingsSection)) !== null) {
+      const [, key, value] = match;
+      settings[key] = value === 'true';
+    }
+    
+    // Extract number values
+    const numRegex = /(\w+):\s*(\d+)/g;
+    while ((match = numRegex.exec(siteSettingsSection)) !== null) {
+      const [, key, value] = match;
+      settings[key] = parseInt(value, 10);
+    }
+    
+    return settings;
+  }
+
+  // Build the full parsed structure from siteSettings.ts
   function parseSiteSettingsTS(content: string): any {
     try {
-      // Extract the siteConfig object from the TypeScript file
-      // Look for: const siteConfig: SiteConfig = { ... };
-      const configMatch = content.match(/const\s+siteConfig\s*:\s*SiteConfig\s*=\s*(\{[\s\S]*?\});?\s*(?:export|$)/);
+      const designTokenColors = extractDesignTokenColors(content);
+      const siteSettings = extractSiteSettings(content);
       
-      if (!configMatch) {
-        // Try alternative pattern without type annotation
-        const altMatch = content.match(/const\s+siteConfig\s*=\s*(\{[\s\S]*?\});?\s*(?:export|$)/);
-        if (!altMatch) {
-          console.log("Could not find siteConfig in file");
-          return null;
-        }
-        return parseObjectLiteral(altMatch[1]);
-      }
-      
-      return parseObjectLiteral(configMatch[1]);
+      return {
+        designTokens: {
+          colors: designTokenColors
+        },
+        siteSettings
+      };
     } catch (error) {
       console.error("Error parsing siteSettings.ts:", error);
       return null;
     }
   }
 
-  // Helper function to parse JavaScript/TypeScript object literal to JSON
-  function parseObjectLiteral(objStr: string): any {
-    try {
-      // Convert TypeScript object literal to JSON:
-      // 1. Handle trailing commas
-      // 2. Quote unquoted keys
-      // 3. Convert single quotes to double quotes
-      
-      let json = objStr
-        // Remove trailing commas before } or ]
-        .replace(/,(\s*[}\]])/g, '$1')
-        // Handle array items with backslash escapes (navigation arrays in template)
-        .replace(/\\\s*\n/g, '')
-        // Quote unquoted property keys
-        .replace(/(\{|\,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
-        // Convert single quotes to double quotes (careful with escaped quotes)
-        .replace(/'/g, '"');
-      
-      return JSON.parse(json);
-    } catch (error) {
-      console.error("Error parsing object literal:", error);
-      // Try a more lenient approach using Function constructor (sandbox)
-      try {
-        // This is safe as we're parsing from our own repo
-        const fn = new Function(`return ${objStr}`);
-        return fn();
-      } catch (e) {
-        console.error("Fallback parsing also failed:", e);
-        return null;
-      }
-    }
-  }
-
   // Helper function to update color values in siteSettings.ts content
-  function updateDesignTokensInTS(content: string, colors: Record<string, string>): string {
+  // Uses targeted line-by-line replacement to preserve file structure
+  function updateDesignTokensInTS(content: string, colors: Record<string, any>): string {
     let updated = content;
+    const lines = updated.split('\n');
     
-    // Update each color in the designTokens.colors section
+    // Process each color
     for (const [key, value] of Object.entries(colors)) {
       if (key === 'text' && typeof value === 'object') {
-        // Handle nested text colors
+        // Handle nested text colors (primary, secondary, muted, inverse)
         const textColors = value as Record<string, string>;
         for (const [textKey, textValue] of Object.entries(textColors)) {
-          const regex = new RegExp(`(${textKey}:\\s*['"])([^'"]+)(['"])`, 'g');
-          updated = updated.replace(regex, `$1${textValue}$3`);
+          // Find line containing this text color property within text: { } block
+          let inTextBlock = false;
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].includes('text:') && lines[i].includes('{')) {
+              inTextBlock = true;
+            }
+            if (inTextBlock && lines[i].includes(`${textKey}:`)) {
+              // Replace the color value on this line
+              lines[i] = lines[i].replace(
+                new RegExp(`(${textKey}:\\s*)(['"])([^'"]+)(['"])`),
+                `$1$2${textValue}$4`
+              );
+              break;
+            }
+            if (inTextBlock && lines[i].includes('},')) {
+              inTextBlock = false;
+            }
+          }
         }
-      } else if (typeof value === 'string') {
-        // Handle simple color values like primary, secondary, etc.
-        // Match patterns like: primary: '#E11D48', or primary: "#E11D48",
-        const regex = new RegExp(`(${key}:\\s*['"])([^'"]+)(['"])`, 'g');
-        updated = updated.replace(regex, `$1${value}$3`);
-      }
-    }
-    
-    return updated;
-  }
-
-  // Helper function to update site settings in siteSettings.ts content
-  function updateSiteSettingsInTS(content: string, settings: Record<string, any>): string {
-    let updated = content;
-    
-    for (const [key, value] of Object.entries(settings)) {
-      if (typeof value === 'string') {
-        // Match patterns like: siteName: 'Riven', or siteName: "Riven",
-        const regex = new RegExp(`(${key}:\\s*['"])([^'"]+)(['"])`, 'g');
-        updated = updated.replace(regex, `$1${value}$3`);
-      } else if (typeof value === 'boolean') {
-        // Match patterns like: enableSearch: true,
-        const regex = new RegExp(`(${key}:\\s*)(true|false)`, 'g');
-        updated = updated.replace(regex, `$1${value}`);
-      } else if (typeof value === 'number') {
-        // Match patterns like: postsPerPage: 9,
-        const regex = new RegExp(`(${key}:\\s*)(\\d+)`, 'g');
-        updated = updated.replace(regex, `$1${value}`);
-      } else if (typeof value === 'object' && value !== null) {
-        // Handle nested objects like logo, seo, social, etc.
-        for (const [nestedKey, nestedValue] of Object.entries(value)) {
-          if (typeof nestedValue === 'string') {
-            const regex = new RegExp(`(${nestedKey}:\\s*['"])([^'"]+)(['"])`, 'g');
-            updated = updated.replace(regex, `$1${nestedValue}$3`);
-          } else if (typeof nestedValue === 'boolean') {
-            const regex = new RegExp(`(${nestedKey}:\\s*)(true|false)`, 'g');
-            updated = updated.replace(regex, `$1${nestedValue}`);
+      } else if (typeof value === 'string' && value.startsWith('#')) {
+        // Handle simple color values - find the specific line
+        // Be careful to only match in the colors: { } section
+        let inColorsBlock = false;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].includes('colors:') && lines[i].includes('{')) {
+            inColorsBlock = true;
+          }
+          if (inColorsBlock && lines[i].match(new RegExp(`^\\s+${key}:`))) {
+            // Replace the color value on this line
+            lines[i] = lines[i].replace(
+              new RegExp(`(${key}:\\s*)(['"])([^'"]+)(['"])`),
+              `$1$2${value}$4`
+            );
+            break;
+          }
+          // Exit colors block when we hit the closing brace at the right indentation
+          if (inColorsBlock && lines[i].match(/^\s{4}\},?\s*$/)) {
+            inColorsBlock = false;
           }
         }
       }
     }
     
-    return updated;
+    return lines.join('\n');
+  }
+
+  // Helper function to update site settings in siteSettings.ts content
+  function updateSiteSettingsInTS(content: string, settings: Record<string, any>): string {
+    let updated = content;
+    const lines = updated.split('\n');
+    
+    // Find the siteSettings section
+    let inSiteSettingsBlock = false;
+    let siteSettingsStart = -1;
+    
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].includes('siteSettings:') && lines[i].includes('{')) {
+        inSiteSettingsBlock = true;
+        siteSettingsStart = i;
+        continue;
+      }
+      
+      if (!inSiteSettingsBlock) continue;
+      
+      // Process each setting
+      for (const [key, value] of Object.entries(settings)) {
+        if (typeof value === 'string') {
+          if (lines[i].match(new RegExp(`^\\s+${key}:`))) {
+            lines[i] = lines[i].replace(
+              new RegExp(`(${key}:\\s*)(['"])([^'"]*?)(['"])`),
+              `$1$2${value.replace(/'/g, "\\'")}$4`
+            );
+          }
+        } else if (typeof value === 'boolean') {
+          if (lines[i].match(new RegExp(`^\\s+${key}:`))) {
+            lines[i] = lines[i].replace(
+              new RegExp(`(${key}:\\s*)(true|false)`),
+              `$1${value}`
+            );
+          }
+        } else if (typeof value === 'number') {
+          if (lines[i].match(new RegExp(`^\\s+${key}:`))) {
+            lines[i] = lines[i].replace(
+              new RegExp(`(${key}:\\s*)(\\d+)`),
+              `$1${value}`
+            );
+          }
+        } else if (typeof value === 'object' && value !== null) {
+          // Handle nested objects
+          for (const [nestedKey, nestedValue] of Object.entries(value)) {
+            if (typeof nestedValue === 'string' && lines[i].includes(`${nestedKey}:`)) {
+              lines[i] = lines[i].replace(
+                new RegExp(`(${nestedKey}:\\s*)(['"])([^'"]*?)(['"])`),
+                `$1$2${(nestedValue as string).replace(/'/g, "\\'")}$4`
+              );
+            } else if (typeof nestedValue === 'boolean' && lines[i].includes(`${nestedKey}:`)) {
+              lines[i] = lines[i].replace(
+                new RegExp(`(${nestedKey}:\\s*)(true|false)`),
+                `$1${nestedValue}`
+              );
+            }
+          }
+        }
+      }
+      
+      // Exit siteSettings block at the appropriate closing brace
+      if (lines[i].match(/^\s{2}\},?\s*$/) && i > siteSettingsStart) {
+        break;
+      }
+    }
+    
+    return lines.join('\n');
   }
 
   // Get site settings from siteSettings.ts (new template format)
