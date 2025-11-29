@@ -1763,6 +1763,304 @@ export async function registerRoutes(
     }
   });
 
+  // ============== SITE SETTINGS (New Template) ==============
+  // For template-egpress-v1 which uses src/config/siteSettings.ts
+
+  // Helper function to parse TypeScript siteSettings.ts into JSON
+  function parseSiteSettingsTS(content: string): any {
+    try {
+      // Extract the siteConfig object from the TypeScript file
+      // Look for: const siteConfig: SiteConfig = { ... };
+      const configMatch = content.match(/const\s+siteConfig\s*:\s*SiteConfig\s*=\s*(\{[\s\S]*?\});?\s*(?:export|$)/);
+      
+      if (!configMatch) {
+        // Try alternative pattern without type annotation
+        const altMatch = content.match(/const\s+siteConfig\s*=\s*(\{[\s\S]*?\});?\s*(?:export|$)/);
+        if (!altMatch) {
+          console.log("Could not find siteConfig in file");
+          return null;
+        }
+        return parseObjectLiteral(altMatch[1]);
+      }
+      
+      return parseObjectLiteral(configMatch[1]);
+    } catch (error) {
+      console.error("Error parsing siteSettings.ts:", error);
+      return null;
+    }
+  }
+
+  // Helper function to parse JavaScript/TypeScript object literal to JSON
+  function parseObjectLiteral(objStr: string): any {
+    try {
+      // Convert TypeScript object literal to JSON:
+      // 1. Handle trailing commas
+      // 2. Quote unquoted keys
+      // 3. Convert single quotes to double quotes
+      
+      let json = objStr
+        // Remove trailing commas before } or ]
+        .replace(/,(\s*[}\]])/g, '$1')
+        // Handle array items with backslash escapes (navigation arrays in template)
+        .replace(/\\\s*\n/g, '')
+        // Quote unquoted property keys
+        .replace(/(\{|\,)\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*:/g, '$1"$2":')
+        // Convert single quotes to double quotes (careful with escaped quotes)
+        .replace(/'/g, '"');
+      
+      return JSON.parse(json);
+    } catch (error) {
+      console.error("Error parsing object literal:", error);
+      // Try a more lenient approach using Function constructor (sandbox)
+      try {
+        // This is safe as we're parsing from our own repo
+        const fn = new Function(`return ${objStr}`);
+        return fn();
+      } catch (e) {
+        console.error("Fallback parsing also failed:", e);
+        return null;
+      }
+    }
+  }
+
+  // Helper function to update color values in siteSettings.ts content
+  function updateDesignTokensInTS(content: string, colors: Record<string, string>): string {
+    let updated = content;
+    
+    // Update each color in the designTokens.colors section
+    for (const [key, value] of Object.entries(colors)) {
+      if (key === 'text' && typeof value === 'object') {
+        // Handle nested text colors
+        const textColors = value as Record<string, string>;
+        for (const [textKey, textValue] of Object.entries(textColors)) {
+          const regex = new RegExp(`(${textKey}:\\s*['"])([^'"]+)(['"])`, 'g');
+          updated = updated.replace(regex, `$1${textValue}$3`);
+        }
+      } else if (typeof value === 'string') {
+        // Handle simple color values like primary, secondary, etc.
+        // Match patterns like: primary: '#E11D48', or primary: "#E11D48",
+        const regex = new RegExp(`(${key}:\\s*['"])([^'"]+)(['"])`, 'g');
+        updated = updated.replace(regex, `$1${value}$3`);
+      }
+    }
+    
+    return updated;
+  }
+
+  // Helper function to update site settings in siteSettings.ts content
+  function updateSiteSettingsInTS(content: string, settings: Record<string, any>): string {
+    let updated = content;
+    
+    for (const [key, value] of Object.entries(settings)) {
+      if (typeof value === 'string') {
+        // Match patterns like: siteName: 'Riven', or siteName: "Riven",
+        const regex = new RegExp(`(${key}:\\s*['"])([^'"]+)(['"])`, 'g');
+        updated = updated.replace(regex, `$1${value}$3`);
+      } else if (typeof value === 'boolean') {
+        // Match patterns like: enableSearch: true,
+        const regex = new RegExp(`(${key}:\\s*)(true|false)`, 'g');
+        updated = updated.replace(regex, `$1${value}`);
+      } else if (typeof value === 'number') {
+        // Match patterns like: postsPerPage: 9,
+        const regex = new RegExp(`(${key}:\\s*)(\\d+)`, 'g');
+        updated = updated.replace(regex, `$1${value}`);
+      } else if (typeof value === 'object' && value !== null) {
+        // Handle nested objects like logo, seo, social, etc.
+        for (const [nestedKey, nestedValue] of Object.entries(value)) {
+          if (typeof nestedValue === 'string') {
+            const regex = new RegExp(`(${nestedKey}:\\s*['"])([^'"]+)(['"])`, 'g');
+            updated = updated.replace(regex, `$1${nestedValue}$3`);
+          } else if (typeof nestedValue === 'boolean') {
+            const regex = new RegExp(`(${nestedKey}:\\s*)(true|false)`, 'g');
+            updated = updated.replace(regex, `$1${nestedValue}`);
+          }
+        }
+      }
+    }
+    
+    return updated;
+  }
+
+  // Get site settings from siteSettings.ts (new template format)
+  app.get("/api/site-settings", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+      const filePath = "src/config/siteSettings.ts";
+
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: filePath,
+          ref: repo.activeBranch,
+        });
+
+        if (!Array.isArray(data) && "content" in data) {
+          const content = Buffer.from(data.content, "base64").toString("utf-8");
+          const parsed = parseSiteSettingsTS(content);
+          
+          if (parsed) {
+            res.json({ 
+              success: true, 
+              data: parsed,
+              source: filePath,
+              templateType: "egpress-v1"
+            });
+          } else {
+            res.json({ 
+              success: false, 
+              error: "Could not parse siteSettings.ts",
+              rawContent: content.substring(0, 1000) // For debugging
+            });
+          }
+        } else {
+          res.json({ success: false, error: "Invalid file response" });
+        }
+      } catch (err: any) {
+        // File doesn't exist - not an egpress-v1 template
+        if (err.status === 404) {
+          res.json({ 
+            success: false, 
+            error: "siteSettings.ts not found - this may not be an egpress-v1 template",
+            templateType: "unknown"
+          });
+        } else {
+          throw err;
+        }
+      }
+    } catch (error: any) {
+      console.error("Get site settings error:", error);
+      res.json({ success: false, error: error.message || "Failed to get site settings" });
+    }
+  });
+
+  // Update site settings in siteSettings.ts (new template format)
+  app.put("/api/site-settings", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const { designTokens, siteSettings, commitMessage } = req.body;
+      const octokit = await getGitHubClient();
+      const filePath = "src/config/siteSettings.ts";
+
+      // Get current file content
+      const { data } = await octokit.repos.getContent({
+        owner: repo.owner,
+        repo: repo.name,
+        path: filePath,
+        ref: repo.activeBranch,
+      });
+
+      if (Array.isArray(data) || !("content" in data)) {
+        return res.json({ success: false, error: "Invalid file response" });
+      }
+
+      let content = Buffer.from(data.content, "base64").toString("utf-8");
+      const originalContent = content;
+
+      // Update design tokens (colors)
+      if (designTokens?.colors) {
+        content = updateDesignTokensInTS(content, designTokens.colors);
+      }
+
+      // Update site settings
+      if (siteSettings) {
+        content = updateSiteSettingsInTS(content, siteSettings);
+      }
+
+      // Only commit if content changed
+      if (content !== originalContent) {
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: filePath,
+          message: commitMessage || "Update site settings",
+          content: Buffer.from(content).toString("base64"),
+          sha: data.sha,
+          branch: repo.activeBranch,
+        });
+
+        res.json({ 
+          success: true, 
+          message: "Site settings updated successfully",
+          filePath
+        });
+      } else {
+        res.json({ 
+          success: true, 
+          message: "No changes detected",
+          filePath
+        });
+      }
+    } catch (error: any) {
+      console.error("Update site settings error:", error);
+      res.json({ success: false, error: error.message || "Failed to update site settings" });
+    }
+  });
+
+  // Detect template type (legacy vs egpress-v1)
+  app.get("/api/template-type", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+      
+      // Check for siteSettings.ts (egpress-v1)
+      try {
+        await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/config/siteSettings.ts",
+          ref: repo.activeBranch,
+        });
+        return res.json({ 
+          success: true, 
+          templateType: "egpress-v1",
+          configFile: "src/config/siteSettings.ts"
+        });
+      } catch {
+        // File doesn't exist
+      }
+
+      // Check for theme.json (legacy)
+      try {
+        await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/config/theme.json",
+          ref: repo.activeBranch,
+        });
+        return res.json({ 
+          success: true, 
+          templateType: "legacy",
+          configFile: "src/config/theme.json"
+        });
+      } catch {
+        // File doesn't exist
+      }
+
+      res.json({ 
+        success: true, 
+        templateType: "unknown",
+        configFile: null
+      });
+    } catch (error: any) {
+      console.error("Detect template type error:", error);
+      res.json({ success: false, error: error.message });
+    }
+  });
+
   // Get AdSense config
   app.get("/api/adsense", async (req, res) => {
     try {
