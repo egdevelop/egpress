@@ -1864,56 +1864,111 @@ export async function registerRoutes(
     }
   }
 
-  // Helper function to update color values in siteSettings.ts content
-  // Uses targeted line-by-line replacement to preserve file structure
-  function updateDesignTokensInTS(content: string, colors: Record<string, any>): string {
-    let updated = content;
-    const lines = updated.split('\n');
+  // Count braces in a line, accounting for braces inside string literals
+  function countBracesInLine(line: string): { open: number; close: number } {
+    let open = 0;
+    let close = 0;
+    let inString = false;
+    let stringChar = '';
     
-    // Process each color
-    for (const [key, value] of Object.entries(colors)) {
-      if (key === 'text' && typeof value === 'object') {
-        // Handle nested text colors (primary, secondary, muted, inverse)
-        const textColors = value as Record<string, string>;
-        for (const [textKey, textValue] of Object.entries(textColors)) {
-          // Find line containing this text color property within text: { } block
-          let inTextBlock = false;
-          for (let i = 0; i < lines.length; i++) {
-            if (lines[i].includes('text:') && lines[i].includes('{')) {
-              inTextBlock = true;
-            }
-            if (inTextBlock && lines[i].includes(`${textKey}:`)) {
-              // Replace the color value on this line
-              lines[i] = lines[i].replace(
-                new RegExp(`(${textKey}:\\s*)(['"])([^'"]+)(['"])`),
-                `$1$2${textValue}$4`
-              );
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      const prevChar = i > 0 ? line[i - 1] : '';
+      
+      if (inString) {
+        if (char === stringChar && prevChar !== '\\') {
+          inString = false;
+        }
+      } else {
+        if (char === '"' || char === "'") {
+          inString = true;
+          stringChar = char;
+        } else if (char === '{') {
+          open++;
+        } else if (char === '}') {
+          close++;
+        }
+      }
+    }
+    
+    return { open, close };
+  }
+
+  // Find the line range for a specific block in the content
+  function findBlockRange(content: string, blockPattern: RegExp): { start: number; end: number } | null {
+    const lines = content.split('\n');
+    let start = -1;
+    let braceCount = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      
+      if (start === -1) {
+        if (blockPattern.test(line)) {
+          start = i;
+          const { open, close } = countBracesInLine(line);
+          braceCount = open - close;
+          if (braceCount === 0) {
+            return { start, end: i };
+          }
+        }
+      } else {
+        const { open, close } = countBracesInLine(line);
+        braceCount += open - close;
+        if (braceCount === 0) {
+          return { start, end: i };
+        }
+      }
+    }
+    
+    return null;
+  }
+
+  // Helper function to update color values in siteSettings.ts content
+  // Uses block range detection to avoid updating wrong sections
+  function updateDesignTokensInTS(content: string, colors: Record<string, any>): string {
+    const lines = content.split('\n');
+    
+    // Find the designTokens.colors block
+    const colorsRange = findBlockRange(content, /^\s+colors:\s*\{/);
+    if (!colorsRange) return content;
+    
+    // Find the text block within colors
+    const textBlockContent = lines.slice(colorsRange.start, colorsRange.end + 1).join('\n');
+    const textRangeRelative = findBlockRange(textBlockContent, /^\s+text:\s*\{/);
+    const textRange = textRangeRelative ? {
+      start: colorsRange.start + textRangeRelative.start,
+      end: colorsRange.start + textRangeRelative.end
+    } : null;
+    
+    // Update colors within the colors block
+    for (let i = colorsRange.start + 1; i <= colorsRange.end - 1; i++) {
+      const line = lines[i];
+      
+      // Check if we're in the text block
+      const inTextBlock = textRange && i >= textRange.start && i <= textRange.end;
+      
+      if (inTextBlock && i > textRange.start && i < textRange.end) {
+        // Update text sub-colors only
+        if (colors.text && typeof colors.text === 'object') {
+          for (const [textKey, textValue] of Object.entries(colors.text as Record<string, string>)) {
+            const keyMatch = line.match(new RegExp(`^(\\s+)(${textKey}):\\s*(['"])([^'"]+)(['"])`));
+            if (keyMatch) {
+              lines[i] = `${keyMatch[1]}${keyMatch[2]}: ${keyMatch[3]}${textValue}${keyMatch[5]},`;
               break;
-            }
-            if (inTextBlock && lines[i].includes('},')) {
-              inTextBlock = false;
             }
           }
         }
-      } else if (typeof value === 'string' && value.startsWith('#')) {
-        // Handle simple color values - find the specific line
-        // Be careful to only match in the colors: { } section
-        let inColorsBlock = false;
-        for (let i = 0; i < lines.length; i++) {
-          if (lines[i].includes('colors:') && lines[i].includes('{')) {
-            inColorsBlock = true;
-          }
-          if (inColorsBlock && lines[i].match(new RegExp(`^\\s+${key}:`))) {
-            // Replace the color value on this line
-            lines[i] = lines[i].replace(
-              new RegExp(`(${key}:\\s*)(['"])([^'"]+)(['"])`),
-              `$1$2${value}$4`
-            );
+      } else if (!inTextBlock) {
+        // Update top-level colors (not in text block)
+        for (const [key, value] of Object.entries(colors)) {
+          if (key === 'text') continue;
+          if (typeof value !== 'string' || !value.startsWith('#')) continue;
+          
+          const keyMatch = line.match(new RegExp(`^(\\s+)(${key}):\\s*(['"])([^'"]+)(['"])`));
+          if (keyMatch) {
+            lines[i] = `${keyMatch[1]}${keyMatch[2]}: ${keyMatch[3]}${value}${keyMatch[5]},`;
             break;
-          }
-          // Exit colors block when we hit the closing brace at the right indentation
-          if (inColorsBlock && lines[i].match(/^\s{4}\},?\s*$/)) {
-            inColorsBlock = false;
           }
         }
       }
@@ -1923,67 +1978,121 @@ export async function registerRoutes(
   }
 
   // Helper function to update site settings in siteSettings.ts content
+  // Uses block range detection to update only the right properties
   function updateSiteSettingsInTS(content: string, settings: Record<string, any>): string {
-    let updated = content;
-    const lines = updated.split('\n');
+    const lines = content.split('\n');
     
-    // Find the siteSettings section
-    let inSiteSettingsBlock = false;
-    let siteSettingsStart = -1;
+    // Find the siteSettings block
+    const siteSettingsRange = findBlockRange(content, /^\s+siteSettings:\s*\{/);
+    if (!siteSettingsRange) return content;
     
-    for (let i = 0; i < lines.length; i++) {
-      if (lines[i].includes('siteSettings:') && lines[i].includes('{')) {
-        inSiteSettingsBlock = true;
-        siteSettingsStart = i;
-        continue;
+    // Known nested blocks within siteSettings
+    const nestedBlocks = ['logo', 'seo', 'social', 'contact', 'features'];
+    
+    // Find ranges for each nested block
+    const nestedRanges: Record<string, { start: number; end: number }> = {};
+    const siteSettingsContent = lines.slice(siteSettingsRange.start, siteSettingsRange.end + 1).join('\n');
+    
+    for (const blockName of nestedBlocks) {
+      const rangeRelative = findBlockRange(siteSettingsContent, new RegExp(`^\\s+${blockName}:\\s*\\{`));
+      if (rangeRelative) {
+        nestedRanges[blockName] = {
+          start: siteSettingsRange.start + rangeRelative.start,
+          end: siteSettingsRange.start + rangeRelative.end
+        };
       }
+    }
+    
+    // Find navigation blocks to skip (they have complex structure)
+    const navRanges: Array<{ start: number; end: number }> = [];
+    let navMatch;
+    const navPattern = /^\s+navigation\w*:\s*\[/gm;
+    let searchContent = siteSettingsContent;
+    while ((navMatch = navPattern.exec(searchContent)) !== null) {
+      // Find matching closing bracket
+      let bracketCount = 1;
+      let endIdx = navMatch.index + navMatch[0].length;
+      while (bracketCount > 0 && endIdx < searchContent.length) {
+        if (searchContent[endIdx] === '[') bracketCount++;
+        if (searchContent[endIdx] === ']') bracketCount--;
+        endIdx++;
+      }
+      // Convert to line numbers
+      const startLine = searchContent.substring(0, navMatch.index).split('\n').length - 1;
+      const endLine = searchContent.substring(0, endIdx).split('\n').length - 1;
+      navRanges.push({
+        start: siteSettingsRange.start + startLine,
+        end: siteSettingsRange.start + endLine
+      });
+    }
+    
+    // Update settings within siteSettings block
+    for (let i = siteSettingsRange.start + 1; i <= siteSettingsRange.end - 1; i++) {
+      const line = lines[i];
       
-      if (!inSiteSettingsBlock) continue;
+      // Skip navigation arrays
+      const inNav = navRanges.some(r => i >= r.start && i <= r.end);
+      if (inNav) continue;
       
-      // Process each setting
-      for (const [key, value] of Object.entries(settings)) {
-        if (typeof value === 'string') {
-          if (lines[i].match(new RegExp(`^\\s+${key}:`))) {
-            lines[i] = lines[i].replace(
-              new RegExp(`(${key}:\\s*)(['"])([^'"]*?)(['"])`),
-              `$1$2${value.replace(/'/g, "\\'")}$4`
-            );
-          }
-        } else if (typeof value === 'boolean') {
-          if (lines[i].match(new RegExp(`^\\s+${key}:`))) {
-            lines[i] = lines[i].replace(
-              new RegExp(`(${key}:\\s*)(true|false)`),
-              `$1${value}`
-            );
-          }
-        } else if (typeof value === 'number') {
-          if (lines[i].match(new RegExp(`^\\s+${key}:`))) {
-            lines[i] = lines[i].replace(
-              new RegExp(`(${key}:\\s*)(\\d+)`),
-              `$1${value}`
-            );
-          }
-        } else if (typeof value === 'object' && value !== null) {
-          // Handle nested objects
-          for (const [nestedKey, nestedValue] of Object.entries(value)) {
-            if (typeof nestedValue === 'string' && lines[i].includes(`${nestedKey}:`)) {
-              lines[i] = lines[i].replace(
-                new RegExp(`(${nestedKey}:\\s*)(['"])([^'"]*?)(['"])`),
-                `$1$2${(nestedValue as string).replace(/'/g, "\\'")}$4`
-              );
-            } else if (typeof nestedValue === 'boolean' && lines[i].includes(`${nestedKey}:`)) {
-              lines[i] = lines[i].replace(
-                new RegExp(`(${nestedKey}:\\s*)(true|false)`),
-                `$1${nestedValue}`
-              );
-            }
-          }
+      // Check if in a nested block
+      let currentBlock: string | null = null;
+      for (const [blockName, range] of Object.entries(nestedRanges)) {
+        if (i > range.start && i < range.end) {
+          currentBlock = blockName;
+          break;
         }
       }
       
-      // Exit siteSettings block at the appropriate closing brace
-      if (lines[i].match(/^\s{2}\},?\s*$/) && i > siteSettingsStart) {
-        break;
+      if (currentBlock) {
+        // Update properties in nested block
+        const blockSettings = settings[currentBlock];
+        if (blockSettings && typeof blockSettings === 'object') {
+          for (const [nestedKey, nestedValue] of Object.entries(blockSettings)) {
+            const keyMatch = line.match(new RegExp(`^(\\s+)(${nestedKey}):\\s*`));
+            if (keyMatch) {
+              if (typeof nestedValue === 'string') {
+                const escapedValue = (nestedValue as string).replace(/'/g, "\\'");
+                lines[i] = line.replace(
+                  new RegExp(`(${nestedKey}:\\s*)(['"])([^'"]*?)(['"])`),
+                  `$1$2${escapedValue}$4`
+                );
+              } else if (typeof nestedValue === 'boolean') {
+                lines[i] = line.replace(
+                  new RegExp(`(${nestedKey}:\\s*)(true|false)`),
+                  `$1${nestedValue}`
+                );
+              }
+              break;
+            }
+          }
+        }
+      } else {
+        // Update top-level properties (not in any nested block)
+        for (const [key, value] of Object.entries(settings)) {
+          if (nestedBlocks.includes(key)) continue;
+          
+          const keyMatch = line.match(new RegExp(`^(\\s+)(${key}):\\s*`));
+          if (keyMatch) {
+            if (typeof value === 'string') {
+              const escapedValue = value.replace(/'/g, "\\'");
+              lines[i] = line.replace(
+                new RegExp(`(${key}:\\s*)(['"])([^'"]*?)(['"])`),
+                `$1$2${escapedValue}$4`
+              );
+            } else if (typeof value === 'boolean') {
+              lines[i] = line.replace(
+                new RegExp(`(${key}:\\s*)(true|false)`),
+                `$1${value}`
+              );
+            } else if (typeof value === 'number') {
+              lines[i] = line.replace(
+                new RegExp(`(${key}:\\s*)(\\d+)`),
+                `$1${value}`
+              );
+            }
+            break;
+          }
+        }
       }
     }
     
