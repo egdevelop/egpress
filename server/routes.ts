@@ -28,6 +28,7 @@ import yaml from "yaml";
 import { Octokit } from "@octokit/rest";
 import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
 import { siteConfigSchema, adsenseConfigSchema } from "@shared/schema";
+import { Project, SyntaxKind, ObjectLiteralExpression, PropertyAssignment } from 'ts-morph';
 
 declare module "express-session" {
   interface SessionData {
@@ -1864,239 +1865,198 @@ export async function registerRoutes(
     }
   }
 
-  // Count braces in a line, accounting for braces inside string literals
-  function countBracesInLine(line: string): { open: number; close: number } {
-    let open = 0;
-    let close = 0;
-    let inString = false;
-    let stringChar = '';
-    
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      const prevChar = i > 0 ? line[i - 1] : '';
+  // AST-based TypeScript config updater using ts-morph
+  // This provides safe, targeted updates without corrupting unrelated values
+  
+  // Helper to find a property in an object literal by name
+  function findProperty(obj: ObjectLiteralExpression, name: string): PropertyAssignment | undefined {
+    return obj.getProperties().find(
+      p => p.isKind(SyntaxKind.PropertyAssignment) && p.getName() === name
+    ) as PropertyAssignment | undefined;
+  }
+  
+  // Helper to update a string value in a property, preserving original quote style
+  function updateStringProperty(prop: PropertyAssignment, newValue: string): void {
+    const initializer = prop.getInitializer();
+    if (initializer?.isKind(SyntaxKind.StringLiteral)) {
+      const originalText = initializer.getText();
+      const quoteChar = originalText.startsWith('"') ? '"' : "'";
+      const escapeChar = quoteChar === '"' ? '\\"' : "\\'";
+      const escapedValue = newValue.replace(new RegExp(quoteChar, 'g'), escapeChar);
+      initializer.replaceWithText(`${quoteChar}${escapedValue}${quoteChar}`);
+    }
+  }
+  
+  // Helper to update a boolean value in a property
+  function updateBooleanProperty(prop: PropertyAssignment, newValue: boolean): void {
+    const initializer = prop.getInitializer();
+    if (initializer?.isKind(SyntaxKind.TrueKeyword) || initializer?.isKind(SyntaxKind.FalseKeyword)) {
+      initializer.replaceWithText(String(newValue));
+    }
+  }
+  
+  // Helper to recursively update properties in an object, handling nested objects
+  function updateNestedProperties(obj: ObjectLiteralExpression, updates: Record<string, any>): void {
+    for (const [key, value] of Object.entries(updates)) {
+      const prop = findProperty(obj, key);
+      if (!prop) continue;
       
-      if (inString) {
-        if (char === stringChar && prevChar !== '\\') {
-          inString = false;
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Handle nested object recursively
+        const nestedObj = prop.getInitializer();
+        if (nestedObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+          updateNestedProperties(nestedObj as ObjectLiteralExpression, value);
         }
-      } else {
-        if (char === '"' || char === "'") {
-          inString = true;
-          stringChar = char;
-        } else if (char === '{') {
-          open++;
-        } else if (char === '}') {
-          close++;
-        }
+      } else if (typeof value === 'string') {
+        updateStringProperty(prop, value);
+      } else if (typeof value === 'boolean') {
+        updateBooleanProperty(prop, value);
       }
     }
-    
-    return { open, close };
   }
-
-  // Find the line range for a specific block in the content
-  function findBlockRange(content: string, blockPattern: RegExp): { start: number; end: number } | null {
-    const lines = content.split('\n');
-    let start = -1;
-    let braceCount = 0;
+  
+  // Helper to unwrap type assertions (satisfies, as) to get the underlying expression
+  function unwrapTypeAssertions(node: any): any {
+    if (!node) return null;
     
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      
-      if (start === -1) {
-        if (blockPattern.test(line)) {
-          start = i;
-          const { open, close } = countBracesInLine(line);
-          braceCount = open - close;
-          if (braceCount === 0) {
-            return { start, end: i };
-          }
+    // Handle: expr satisfies Type
+    if (node.isKind && node.isKind(SyntaxKind.SatisfiesExpression)) {
+      return unwrapTypeAssertions(node.getExpression());
+    }
+    
+    // Handle: expr as Type
+    if (node.isKind && node.isKind(SyntaxKind.AsExpression)) {
+      return unwrapTypeAssertions(node.getExpression());
+    }
+    
+    // Handle: (expr) parenthesized
+    if (node.isKind && node.isKind(SyntaxKind.ParenthesizedExpression)) {
+      return unwrapTypeAssertions(node.getExpression());
+    }
+    
+    return node;
+  }
+  
+  // Helper to extract the root config object from various export patterns
+  // Handles: export default { ... }, export default factory(() => ({ ... })), 
+  // export default factory(() => ({ ... }) satisfies Type), etc.
+  function getRootConfigObject(sourceFile: any): ObjectLiteralExpression | null {
+    const exportDefault = sourceFile.getStatements().find(
+      (s: any) => s.isKind(SyntaxKind.ExportAssignment)
+    );
+    if (!exportDefault) return null;
+    
+    let exportExpr = unwrapTypeAssertions(exportDefault.getExpression());
+    
+    // Handle plain object export: export default { ... }
+    if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+      return exportExpr as ObjectLiteralExpression;
+    }
+    
+    // Handle factory-wrapped export: export default defineSiteConfig(() => ({ ... }))
+    // or: export default factory({ ... })
+    if (exportExpr?.isKind(SyntaxKind.CallExpression)) {
+      const args = exportExpr.getArguments();
+      for (const arg of args) {
+        const unwrappedArg = unwrapTypeAssertions(arg);
+        
+        // Direct object argument: factory({ ... })
+        if (unwrappedArg?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+          return unwrappedArg as ObjectLiteralExpression;
         }
-      } else {
-        const { open, close } = countBracesInLine(line);
-        braceCount += open - close;
-        if (braceCount === 0) {
-          return { start, end: i };
+        
+        // Arrow function argument: factory(() => ({ ... }))
+        // or: factory(() => ({ ... }) satisfies Type)
+        if (unwrappedArg?.isKind(SyntaxKind.ArrowFunction)) {
+          // Get the arrow function body and unwrap any type assertions
+          let body = unwrappedArg.getBody();
+          body = unwrapTypeAssertions(body);
+          
+          if (body?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return body as ObjectLiteralExpression;
+          }
+          
+          // Also check if body is a block with a return statement
+          if (body?.isKind(SyntaxKind.Block)) {
+            const returnStmt = body.getStatements().find(
+              (s: any) => s.isKind(SyntaxKind.ReturnStatement)
+            );
+            if (returnStmt) {
+              const returnExpr = unwrapTypeAssertions(returnStmt.getExpression());
+              if (returnExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+                return returnExpr as ObjectLiteralExpression;
+              }
+            }
+          }
         }
       }
     }
     
     return null;
   }
-
-  // Helper function to update color values in siteSettings.ts content
-  // Uses block range detection to avoid updating wrong sections
+  
+  // Helper function to update color values in siteSettings.ts content using AST
   function updateDesignTokensInTS(content: string, colors: Record<string, any>): string {
-    const lines = content.split('\n');
-    
-    // Find the designTokens.colors block
-    const colorsRange = findBlockRange(content, /^\s+colors:\s*\{/);
-    if (!colorsRange) return content;
-    
-    // Find the text block within colors
-    const textBlockContent = lines.slice(colorsRange.start, colorsRange.end + 1).join('\n');
-    const textRangeRelative = findBlockRange(textBlockContent, /^\s+text:\s*\{/);
-    const textRange = textRangeRelative ? {
-      start: colorsRange.start + textRangeRelative.start,
-      end: colorsRange.start + textRangeRelative.end
-    } : null;
-    
-    // Update colors within the colors block
-    for (let i = colorsRange.start + 1; i <= colorsRange.end - 1; i++) {
-      const line = lines[i];
+    try {
+      const project = new Project({ useInMemoryFileSystem: true });
+      const sourceFile = project.createSourceFile('temp.ts', content);
       
-      // Check if we're in the text block
-      const inTextBlock = textRange && i >= textRange.start && i <= textRange.end;
+      // Get the root config object (handles both plain and factory-wrapped exports)
+      const rootObj = getRootConfigObject(sourceFile);
+      if (!rootObj) return content;
       
-      if (inTextBlock && i > textRange.start && i < textRange.end) {
-        // Update text sub-colors only
-        if (colors.text && typeof colors.text === 'object') {
-          for (const [textKey, textValue] of Object.entries(colors.text as Record<string, string>)) {
-            const keyMatch = line.match(new RegExp(`^(\\s+)(${textKey}):\\s*(['"])([^'"]+)(['"])`));
-            if (keyMatch) {
-              lines[i] = `${keyMatch[1]}${keyMatch[2]}: ${keyMatch[3]}${textValue}${keyMatch[5]},`;
-              break;
-            }
-          }
-        }
-      } else if (!inTextBlock) {
-        // Update top-level colors (not in text block)
-        for (const [key, value] of Object.entries(colors)) {
-          if (key === 'text') continue;
-          if (typeof value !== 'string' || !value.startsWith('#')) continue;
-          
-          const keyMatch = line.match(new RegExp(`^(\\s+)(${key}):\\s*(['"])([^'"]+)(['"])`));
-          if (keyMatch) {
-            lines[i] = `${keyMatch[1]}${keyMatch[2]}: ${keyMatch[3]}${value}${keyMatch[5]},`;
-            break;
-          }
-        }
-      }
+      // Navigate to designTokens.colors
+      const designTokensProp = findProperty(rootObj, 'designTokens');
+      if (!designTokensProp) return content;
+      
+      const designTokensObj = designTokensProp.getInitializer();
+      if (!designTokensObj?.isKind(SyntaxKind.ObjectLiteralExpression)) return content;
+      
+      const colorsProp = findProperty(designTokensObj as ObjectLiteralExpression, 'colors');
+      if (!colorsProp) return content;
+      
+      const colorsObj = colorsProp.getInitializer();
+      if (!colorsObj?.isKind(SyntaxKind.ObjectLiteralExpression)) return content;
+      
+      const colorsLiteral = colorsObj as ObjectLiteralExpression;
+      
+      // Update colors using recursive helper (handles nested text colors)
+      updateNestedProperties(colorsLiteral, colors);
+      
+      return sourceFile.getFullText();
+    } catch (error) {
+      console.error('Error in updateDesignTokensInTS:', error);
+      return content; // Return original on error
     }
-    
-    return lines.join('\n');
   }
 
-  // Helper function to update site settings in siteSettings.ts content
-  // Uses block range detection to update only the right properties
+  // Helper function to update site settings in siteSettings.ts content using AST
   function updateSiteSettingsInTS(content: string, settings: Record<string, any>): string {
-    const lines = content.split('\n');
-    
-    // Find the siteSettings block
-    const siteSettingsRange = findBlockRange(content, /^\s+siteSettings:\s*\{/);
-    if (!siteSettingsRange) return content;
-    
-    // Known nested blocks within siteSettings
-    const nestedBlocks = ['logo', 'seo', 'social', 'contact', 'features'];
-    
-    // Find ranges for each nested block
-    const nestedRanges: Record<string, { start: number; end: number }> = {};
-    const siteSettingsContent = lines.slice(siteSettingsRange.start, siteSettingsRange.end + 1).join('\n');
-    
-    for (const blockName of nestedBlocks) {
-      const rangeRelative = findBlockRange(siteSettingsContent, new RegExp(`^\\s+${blockName}:\\s*\\{`));
-      if (rangeRelative) {
-        nestedRanges[blockName] = {
-          start: siteSettingsRange.start + rangeRelative.start,
-          end: siteSettingsRange.start + rangeRelative.end
-        };
-      }
-    }
-    
-    // Find navigation blocks to skip (they have complex structure)
-    const navRanges: Array<{ start: number; end: number }> = [];
-    let navMatch;
-    const navPattern = /^\s+navigation\w*:\s*\[/gm;
-    let searchContent = siteSettingsContent;
-    while ((navMatch = navPattern.exec(searchContent)) !== null) {
-      // Find matching closing bracket
-      let bracketCount = 1;
-      let endIdx = navMatch.index + navMatch[0].length;
-      while (bracketCount > 0 && endIdx < searchContent.length) {
-        if (searchContent[endIdx] === '[') bracketCount++;
-        if (searchContent[endIdx] === ']') bracketCount--;
-        endIdx++;
-      }
-      // Convert to line numbers
-      const startLine = searchContent.substring(0, navMatch.index).split('\n').length - 1;
-      const endLine = searchContent.substring(0, endIdx).split('\n').length - 1;
-      navRanges.push({
-        start: siteSettingsRange.start + startLine,
-        end: siteSettingsRange.start + endLine
-      });
-    }
-    
-    // Update settings within siteSettings block
-    for (let i = siteSettingsRange.start + 1; i <= siteSettingsRange.end - 1; i++) {
-      const line = lines[i];
+    try {
+      const project = new Project({ useInMemoryFileSystem: true });
+      const sourceFile = project.createSourceFile('temp.ts', content);
       
-      // Skip navigation arrays
-      const inNav = navRanges.some(r => i >= r.start && i <= r.end);
-      if (inNav) continue;
+      // Get the root config object (handles both plain and factory-wrapped exports)
+      const rootObj = getRootConfigObject(sourceFile);
+      if (!rootObj) return content;
       
-      // Check if in a nested block
-      let currentBlock: string | null = null;
-      for (const [blockName, range] of Object.entries(nestedRanges)) {
-        if (i > range.start && i < range.end) {
-          currentBlock = blockName;
-          break;
-        }
-      }
+      // Navigate to siteSettings
+      const siteSettingsProp = findProperty(rootObj, 'siteSettings');
+      if (!siteSettingsProp) return content;
       
-      if (currentBlock) {
-        // Update properties in nested block
-        const blockSettings = settings[currentBlock];
-        if (blockSettings && typeof blockSettings === 'object') {
-          for (const [nestedKey, nestedValue] of Object.entries(blockSettings)) {
-            const keyMatch = line.match(new RegExp(`^(\\s+)(${nestedKey}):\\s*`));
-            if (keyMatch) {
-              if (typeof nestedValue === 'string') {
-                const escapedValue = (nestedValue as string).replace(/'/g, "\\'");
-                lines[i] = line.replace(
-                  new RegExp(`(${nestedKey}:\\s*)(['"])([^'"]*?)(['"])`),
-                  `$1$2${escapedValue}$4`
-                );
-              } else if (typeof nestedValue === 'boolean') {
-                lines[i] = line.replace(
-                  new RegExp(`(${nestedKey}:\\s*)(true|false)`),
-                  `$1${nestedValue}`
-                );
-              }
-              break;
-            }
-          }
-        }
-      } else {
-        // Update top-level properties (not in any nested block)
-        for (const [key, value] of Object.entries(settings)) {
-          if (nestedBlocks.includes(key)) continue;
-          
-          const keyMatch = line.match(new RegExp(`^(\\s+)(${key}):\\s*`));
-          if (keyMatch) {
-            if (typeof value === 'string') {
-              const escapedValue = value.replace(/'/g, "\\'");
-              lines[i] = line.replace(
-                new RegExp(`(${key}:\\s*)(['"])([^'"]*?)(['"])`),
-                `$1$2${escapedValue}$4`
-              );
-            } else if (typeof value === 'boolean') {
-              lines[i] = line.replace(
-                new RegExp(`(${key}:\\s*)(true|false)`),
-                `$1${value}`
-              );
-            } else if (typeof value === 'number') {
-              lines[i] = line.replace(
-                new RegExp(`(${key}:\\s*)(\\d+)`),
-                `$1${value}`
-              );
-            }
-            break;
-          }
-        }
-      }
+      const siteSettingsObj = siteSettingsProp.getInitializer();
+      if (!siteSettingsObj?.isKind(SyntaxKind.ObjectLiteralExpression)) return content;
+      
+      const siteSettingsLiteral = siteSettingsObj as ObjectLiteralExpression;
+      
+      // Update all settings using recursive helper (handles any nested objects)
+      updateNestedProperties(siteSettingsLiteral, settings);
+      
+      return sourceFile.getFullText();
+    } catch (error) {
+      console.error('Error in updateSiteSettingsInTS:', error);
+      return content; // Return original on error
     }
-    
-    return lines.join('\n');
   }
 
   // Get site settings from siteSettings.ts (new template format)
