@@ -36,7 +36,8 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Copy, Plus, RefreshCw, CheckCircle, ExternalLink, Github, ChevronsUpDown, Lock, Check } from "lucide-react";
+import { Copy, Plus, RefreshCw, CheckCircle, ExternalLink, Github, ChevronsUpDown, Lock, Check, Loader2, Zap } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Repository, GitHubRepo } from "@shared/schema";
@@ -51,10 +52,18 @@ const cloneFormSchema = z.object({
 
 type CloneFormValues = z.infer<typeof cloneFormSchema>;
 
+interface ClonedRepoData {
+  name: string;
+  fullName: string;
+  url: string;
+  fileCount?: number;
+}
+
 export default function CloneSite() {
-  const [clonedRepo, setClonedRepo] = useState<{ name: string; fullName: string; url: string } | null>(null);
+  const [clonedRepo, setClonedRepo] = useState<ClonedRepoData | null>(null);
   const [sourceSelectOpen, setSourceSelectOpen] = useState(false);
   const [sourceSearch, setSourceSearch] = useState("");
+  const [cloneProgress, setCloneProgress] = useState(0);
   const { toast } = useToast();
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
@@ -76,13 +85,27 @@ export default function CloneSite() {
 
   const cloneMutation = useMutation({
     mutationFn: async (data: CloneFormValues) => {
-      const sourceRepo = data.sourceRepo || repoData?.data?.fullName;
-      const response = await apiRequest("POST", "/api/clone-repo", {
-        sourceRepo: sourceRepo,
-        newRepoName: data.newRepoName,
-        description: data.description,
-      });
-      return response.json();
+      setCloneProgress(0);
+      const progressInterval = setInterval(() => {
+        setCloneProgress(prev => Math.min(prev + Math.random() * 15, 90));
+      }, 300);
+      
+      try {
+        const sourceRepo = data.sourceRepo || repoData?.data?.fullName;
+        const response = await apiRequest("POST", "/api/clone-repo", {
+          sourceRepo: sourceRepo,
+          newRepoName: data.newRepoName,
+          description: data.description,
+        });
+        const result = await response.json();
+        clearInterval(progressInterval);
+        setCloneProgress(100);
+        return result;
+      } catch (error) {
+        clearInterval(progressInterval);
+        setCloneProgress(0);
+        throw error;
+      }
     },
     onSuccess: (data) => {
       if (data.success) {
@@ -91,9 +114,10 @@ export default function CloneSite() {
         queryClient.invalidateQueries({ queryKey: ["/api/github/repos"] });
         toast({
           title: "Repository Created",
-          description: `${data.data.fullName} has been created successfully`,
+          description: `${data.data.fullName} created with ${data.data.fileCount || 'all'} files`,
         });
       } else {
+        setCloneProgress(0);
         toast({
           title: "Clone Failed",
           description: data.error || "Failed to create repository",
@@ -102,6 +126,7 @@ export default function CloneSite() {
       }
     },
     onError: () => {
+      setCloneProgress(0);
       toast({
         title: "Clone Failed",
         description: "An error occurred while creating the repository",
@@ -157,10 +182,14 @@ export default function CloneSite() {
       {clonedRepo && (
         <Alert className="border-green-200 bg-green-50 dark:bg-green-950/20 dark:border-green-800">
           <CheckCircle className="w-4 h-4 text-green-600" />
-          <AlertTitle className="text-green-800 dark:text-green-200">Repository Created!</AlertTitle>
+          <AlertTitle className="text-green-800 dark:text-green-200 flex items-center gap-2">
+            Repository Created!
+            <Zap className="w-4 h-4" />
+          </AlertTitle>
           <AlertDescription className="text-green-700 dark:text-green-300">
             <p className="mb-3">
-              <strong>{clonedRepo.fullName}</strong> has been created successfully.
+              <strong>{clonedRepo.fullName}</strong> has been created successfully
+              {clonedRepo.fileCount && ` with ${clonedRepo.fileCount} files`}.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -322,6 +351,22 @@ export default function CloneSite() {
                   )}
                 />
                 
+                {cloneMutation.isPending && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Cloning repository...
+                      </span>
+                      <span className="font-medium">{Math.round(cloneProgress)}%</span>
+                    </div>
+                    <Progress value={cloneProgress} className="h-2" />
+                    <p className="text-xs text-muted-foreground">
+                      Creating blobs and tree structure...
+                    </p>
+                  </div>
+                )}
+                
                 <Button
                   type="submit"
                   className="w-full"
@@ -329,11 +374,11 @@ export default function CloneSite() {
                   data-testid="button-clone-repo"
                 >
                   {cloneMutation.isPending ? (
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   ) : (
-                    <Plus className="w-4 h-4 mr-2" />
+                    <Zap className="w-4 h-4 mr-2" />
                   )}
-                  Create Repository
+                  {cloneMutation.isPending ? "Creating..." : "Create Repository"}
                 </Button>
               </form>
             </Form>
