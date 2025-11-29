@@ -3256,7 +3256,12 @@ export async function registerRoutes(
       
       res.json({ success: true, data: deployment });
     } catch (error: any) {
-      res.json({ success: false, error: error.message });
+      // Provide more helpful error messages
+      let errorMessage = error.message;
+      if (error.message?.includes("GitHub repository can't be found")) {
+        errorMessage = "Vercel tidak punya akses ke repo ini. Buka GitHub Settings > Applications > Vercel, lalu tambahkan repo ini ke daftar akses.";
+      }
+      res.json({ success: false, error: errorMessage });
     }
   });
 
