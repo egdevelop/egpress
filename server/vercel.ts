@@ -291,6 +291,81 @@ export class VercelService {
     };
   }
 
+  // Upload a single file to Vercel and return its SHA
+  async uploadFile(content: Buffer, sha: string): Promise<void> {
+    const url = new URL(`${VERCEL_API_BASE}/v2/files`);
+    if (this.teamId) {
+      url.searchParams.set("teamId", this.teamId);
+    }
+
+    const response = await fetch(url.toString(), {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${this.token}`,
+        "Content-Type": "application/octet-stream",
+        "x-vercel-digest": sha,
+      },
+      body: content,
+    });
+
+    if (!response.ok && response.status !== 409) {
+      // 409 means file already exists, which is fine
+      const errorText = await response.text();
+      throw new Error(`Failed to upload file: ${response.status} - ${errorText}`);
+    }
+  }
+
+  // Deploy using direct file upload (no GitHub integration needed)
+  async deployWithFiles(
+    projectName: string,
+    files: Array<{ path: string; content: Buffer }>,
+    framework: string = "astro"
+  ): Promise<VercelDeployment> {
+    const crypto = await import("crypto");
+    
+    // Calculate SHA and upload each file
+    const fileList: Array<{ file: string; sha: string; size: number }> = [];
+    
+    // Upload files in batches
+    const BATCH_SIZE = 10;
+    for (let i = 0; i < files.length; i += BATCH_SIZE) {
+      const batch = files.slice(i, i + BATCH_SIZE);
+      await Promise.all(batch.map(async (f) => {
+        const sha = crypto.createHash("sha1").update(f.content).digest("hex");
+        await this.uploadFile(f.content, sha);
+        fileList.push({
+          file: f.path,
+          sha,
+          size: f.content.length,
+        });
+      }));
+    }
+
+    // Create deployment with uploaded files
+    const body = {
+      name: projectName,
+      files: fileList,
+      projectSettings: {
+        framework,
+      },
+      target: "production",
+    };
+
+    const d = await this.request<any>("/v13/deployments", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+
+    return {
+      id: d.id,
+      url: d.url ? `https://${d.url}` : "",
+      state: d.readyState || "QUEUED",
+      createdAt: d.createdAt || Date.now(),
+      target: d.target || "production",
+      source: "upload",
+    };
+  }
+
   async getDomainConfig(domain: string): Promise<{
     misconfigured: boolean;
     configuredBy: string | null;
