@@ -1823,50 +1823,112 @@ export async function registerRoutes(
   }
 
   // Get root config object for parsing (handles factory-wrapped exports with satisfies)
+  // Also handles named exports like: export const siteConfig = {...}
   function getRootConfigForParsing(sourceFile: any): ObjectLiteralExpression | null {
+    // First try: export default {...} or export default factory(...)
     const exportDefault = sourceFile.getStatements().find(
       (s: any) => s.isKind(SyntaxKind.ExportAssignment)
     );
-    if (!exportDefault) return null;
     
-    let exportExpr = unwrapForParsing(exportDefault.getExpression());
-    
-    // Handle plain object export: export default { ... }
-    if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-      return exportExpr as ObjectLiteralExpression;
-    }
-    
-    // Handle factory-wrapped export: export default defineSiteConfig(...)
-    if (exportExpr?.isKind(SyntaxKind.CallExpression)) {
-      const args = exportExpr.getArguments();
-      for (const arg of args) {
-        const unwrappedArg = unwrapForParsing(arg);
-        
-        // Direct object argument: factory({ ... })
-        if (unwrappedArg?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-          return unwrappedArg as ObjectLiteralExpression;
-        }
-        
-        // Arrow function argument: factory(() => ({ ... })) or factory(() => ({ ... }) satisfies Type)
-        if (unwrappedArg?.isKind(SyntaxKind.ArrowFunction)) {
-          let body = unwrappedArg.getBody();
-          body = unwrapForParsing(body);
+    if (exportDefault) {
+      let exportExpr = unwrapForParsing(exportDefault.getExpression());
+      
+      // Handle plain object export: export default { ... }
+      if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+        return exportExpr as ObjectLiteralExpression;
+      }
+      
+      // Handle factory-wrapped export: export default defineSiteConfig(...)
+      if (exportExpr?.isKind(SyntaxKind.CallExpression)) {
+        const args = exportExpr.getArguments();
+        for (const arg of args) {
+          const unwrappedArg = unwrapForParsing(arg);
           
-          if (body?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-            return body as ObjectLiteralExpression;
+          // Direct object argument: factory({ ... })
+          if (unwrappedArg?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return unwrappedArg as ObjectLiteralExpression;
           }
           
-          // Block body with return statement
-          if (body?.isKind(SyntaxKind.Block)) {
-            const returnStmt = body.getStatements().find(
-              (s: any) => s.isKind(SyntaxKind.ReturnStatement)
-            );
-            if (returnStmt) {
-              const returnExpr = unwrapForParsing(returnStmt.getExpression());
-              if (returnExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-                return returnExpr as ObjectLiteralExpression;
+          // Arrow function argument: factory(() => ({ ... })) or factory(() => ({ ... }) satisfies Type)
+          if (unwrappedArg?.isKind(SyntaxKind.ArrowFunction)) {
+            let body = unwrappedArg.getBody();
+            body = unwrapForParsing(body);
+            
+            if (body?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+              return body as ObjectLiteralExpression;
+            }
+            
+            // Block body with return statement
+            if (body?.isKind(SyntaxKind.Block)) {
+              const returnStmt = body.getStatements().find(
+                (s: any) => s.isKind(SyntaxKind.ReturnStatement)
+              );
+              if (returnStmt) {
+                const returnExpr = unwrapForParsing(returnStmt.getExpression());
+                if (returnExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+                  return returnExpr as ObjectLiteralExpression;
+                }
               }
             }
+          }
+        }
+      }
+    }
+    
+    // Second try: Named exports like "export const siteConfig = {...}" or "export const settings = {...}"
+    // Common config variable names used in Astro templates
+    const configNames = ['siteConfig', 'config', 'settings', 'siteSettings'];
+    
+    const variableStatements = sourceFile.getStatements().filter(
+      (s: any) => s.isKind(SyntaxKind.VariableStatement)
+    );
+    
+    for (const stmt of variableStatements) {
+      // Check if it's exported
+      const hasExportKeyword = stmt.getModifiers()?.some(
+        (m: any) => m.isKind(SyntaxKind.ExportKeyword)
+      );
+      
+      if (!hasExportKeyword) continue;
+      
+      const declarations = stmt.getDeclarationList()?.getDeclarations() || [];
+      for (const decl of declarations) {
+        const name = decl.getName();
+        
+        // Check if this is a known config variable name
+        if (configNames.includes(name)) {
+          let initializer = decl.getInitializer();
+          initializer = unwrapForParsing(initializer);
+          
+          if (initializer?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return initializer as ObjectLiteralExpression;
+          }
+        }
+      }
+    }
+    
+    // Third try: Find any exported variable that is an object literal with designTokens or siteSettings properties
+    for (const stmt of variableStatements) {
+      const hasExportKeyword = stmt.getModifiers()?.some(
+        (m: any) => m.isKind(SyntaxKind.ExportKeyword)
+      );
+      
+      if (!hasExportKeyword) continue;
+      
+      const declarations = stmt.getDeclarationList()?.getDeclarations() || [];
+      for (const decl of declarations) {
+        let initializer = decl.getInitializer();
+        initializer = unwrapForParsing(initializer);
+        
+        if (initializer?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+          const objLiteral = initializer as ObjectLiteralExpression;
+          // Check if it has designTokens or siteSettings property
+          const hasConfig = objLiteral.getProperties().some(
+            (p: any) => p.isKind(SyntaxKind.PropertyAssignment) && 
+              ['designTokens', 'siteSettings'].includes(p.getName())
+          );
+          if (hasConfig) {
+            return objLiteral;
           }
         }
       }
@@ -2009,52 +2071,109 @@ export async function registerRoutes(
   // Handles: export default { ... }, export default factory(() => ({ ... })), 
   // export default factory(() => ({ ... }) satisfies Type), etc.
   function getRootConfigObject(sourceFile: any): ObjectLiteralExpression | null {
+    // First try: export default {...} or export default factory(...)
     const exportDefault = sourceFile.getStatements().find(
       (s: any) => s.isKind(SyntaxKind.ExportAssignment)
     );
-    if (!exportDefault) return null;
     
-    let exportExpr = unwrapTypeAssertions(exportDefault.getExpression());
-    
-    // Handle plain object export: export default { ... }
-    if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-      return exportExpr as ObjectLiteralExpression;
-    }
-    
-    // Handle factory-wrapped export: export default defineSiteConfig(() => ({ ... }))
-    // or: export default factory({ ... })
-    if (exportExpr?.isKind(SyntaxKind.CallExpression)) {
-      const args = exportExpr.getArguments();
-      for (const arg of args) {
-        const unwrappedArg = unwrapTypeAssertions(arg);
-        
-        // Direct object argument: factory({ ... })
-        if (unwrappedArg?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-          return unwrappedArg as ObjectLiteralExpression;
-        }
-        
-        // Arrow function argument: factory(() => ({ ... }))
-        // or: factory(() => ({ ... }) satisfies Type)
-        if (unwrappedArg?.isKind(SyntaxKind.ArrowFunction)) {
-          // Get the arrow function body and unwrap any type assertions
-          let body = unwrappedArg.getBody();
-          body = unwrapTypeAssertions(body);
+    if (exportDefault) {
+      let exportExpr = unwrapTypeAssertions(exportDefault.getExpression());
+      
+      // Handle plain object export: export default { ... }
+      if (exportExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+        return exportExpr as ObjectLiteralExpression;
+      }
+      
+      // Handle factory-wrapped export: export default defineSiteConfig(() => ({ ... }))
+      // or: export default factory({ ... })
+      if (exportExpr?.isKind(SyntaxKind.CallExpression)) {
+        const args = exportExpr.getArguments();
+        for (const arg of args) {
+          const unwrappedArg = unwrapTypeAssertions(arg);
           
-          if (body?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-            return body as ObjectLiteralExpression;
+          // Direct object argument: factory({ ... })
+          if (unwrappedArg?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return unwrappedArg as ObjectLiteralExpression;
           }
           
-          // Also check if body is a block with a return statement
-          if (body?.isKind(SyntaxKind.Block)) {
-            const returnStmt = body.getStatements().find(
-              (s: any) => s.isKind(SyntaxKind.ReturnStatement)
-            );
-            if (returnStmt) {
-              const returnExpr = unwrapTypeAssertions(returnStmt.getExpression());
-              if (returnExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-                return returnExpr as ObjectLiteralExpression;
+          // Arrow function argument: factory(() => ({ ... }))
+          // or: factory(() => ({ ... }) satisfies Type)
+          if (unwrappedArg?.isKind(SyntaxKind.ArrowFunction)) {
+            // Get the arrow function body and unwrap any type assertions
+            let body = unwrappedArg.getBody();
+            body = unwrapTypeAssertions(body);
+            
+            if (body?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+              return body as ObjectLiteralExpression;
+            }
+            
+            // Also check if body is a block with a return statement
+            if (body?.isKind(SyntaxKind.Block)) {
+              const returnStmt = body.getStatements().find(
+                (s: any) => s.isKind(SyntaxKind.ReturnStatement)
+              );
+              if (returnStmt) {
+                const returnExpr = unwrapTypeAssertions(returnStmt.getExpression());
+                if (returnExpr?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+                  return returnExpr as ObjectLiteralExpression;
+                }
               }
             }
+          }
+        }
+      }
+    }
+    
+    // Second try: Named exports like "export const siteConfig = {...}"
+    const configNames = ['siteConfig', 'config', 'settings', 'siteSettings'];
+    
+    const variableStatements = sourceFile.getStatements().filter(
+      (s: any) => s.isKind(SyntaxKind.VariableStatement)
+    );
+    
+    for (const stmt of variableStatements) {
+      const hasExportKeyword = stmt.getModifiers()?.some(
+        (m: any) => m.isKind(SyntaxKind.ExportKeyword)
+      );
+      
+      if (!hasExportKeyword) continue;
+      
+      const declarations = stmt.getDeclarationList()?.getDeclarations() || [];
+      for (const decl of declarations) {
+        const name = decl.getName();
+        
+        if (configNames.includes(name)) {
+          let initializer = decl.getInitializer();
+          initializer = unwrapTypeAssertions(initializer);
+          
+          if (initializer?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            return initializer as ObjectLiteralExpression;
+          }
+        }
+      }
+    }
+    
+    // Third try: Find any exported variable with designTokens or siteSettings properties
+    for (const stmt of variableStatements) {
+      const hasExportKeyword = stmt.getModifiers()?.some(
+        (m: any) => m.isKind(SyntaxKind.ExportKeyword)
+      );
+      
+      if (!hasExportKeyword) continue;
+      
+      const declarations = stmt.getDeclarationList()?.getDeclarations() || [];
+      for (const decl of declarations) {
+        let initializer = decl.getInitializer();
+        initializer = unwrapTypeAssertions(initializer);
+        
+        if (initializer?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+          const objLiteral = initializer as ObjectLiteralExpression;
+          const hasConfig = objLiteral.getProperties().some(
+            (p: any) => p.isKind(SyntaxKind.PropertyAssignment) && 
+              ['designTokens', 'siteSettings'].includes(p.getName())
+          );
+          if (hasConfig) {
+            return objLiteral;
           }
         }
       }
