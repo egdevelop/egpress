@@ -2426,18 +2426,33 @@ export async function registerRoutes(
         recursive: "true",
       });
 
-      // Create new empty repository (no auto_init for faster clone)
+      // Create repository with auto_init to have an initial commit (required for Git Data API)
       const { data: newRepo } = await octokit.repos.createForAuthenticatedUser({
         name: newRepoName,
         description: description || `Astro blog created from ${sourceRepo}`,
-        auto_init: false,
+        auto_init: true,
         private: false,
       });
 
       console.log(`Created repo: ${newRepo.full_name}`);
       
-      // Small delay to let GitHub initialize the repo
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Wait for GitHub to initialize the repo with initial commit
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Get the new repo's default branch
+      const { data: newRepoInfo } = await octokit.repos.get({
+        owner: user.login,
+        repo: newRepoName,
+      });
+      const newRepoBranch = newRepoInfo.default_branch || "main";
+
+      // Get the initial commit ref
+      const { data: refData } = await octokit.git.getRef({
+        owner: user.login,
+        repo: newRepoName,
+        ref: `heads/${newRepoBranch}`,
+      });
+      const baseCommitSha = refData.object.sha;
 
       // Filter only blob (file) items from source tree
       const blobItems = sourceTree.tree.filter(item => item.type === "blob" && item.sha && item.path);
@@ -2498,34 +2513,30 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No files could be copied from source repository" });
       }
 
-      // Create tree with all files at once
+      // Create tree with all files at once (using base commit as parent tree)
       const { data: newTree } = await octokit.git.createTree({
         owner: user.login,
         repo: newRepoName,
         tree: newTreeItems,
+        base_tree: baseCommitSha,
       });
 
-      // Create initial commit
+      // Create commit with the new tree
       const { data: newCommit } = await octokit.git.createCommit({
         owner: user.login,
         repo: newRepoName,
         message: `Initial commit - cloned from ${sourceRepo}`,
         tree: newTree.sha,
+        parents: [baseCommitSha],
       });
 
-      // Create main branch pointing to the commit
-      await octokit.git.createRef({
+      // Update the branch ref to point to the new commit
+      await octokit.git.updateRef({
         owner: user.login,
         repo: newRepoName,
-        ref: "refs/heads/main",
+        ref: `heads/${newRepoBranch}`,
         sha: newCommit.sha,
-      });
-
-      // Update default branch to main
-      await octokit.repos.update({
-        owner: user.login,
-        repo: newRepoName,
-        default_branch: "main",
+        force: true,
       });
 
       console.log(`Clone completed: ${newTreeItems.length} files copied`);
