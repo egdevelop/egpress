@@ -2434,19 +2434,29 @@ export async function registerRoutes(
         private: false,
       });
 
+      console.log(`Created repo: ${newRepo.full_name}`);
+      
+      // Small delay to let GitHub initialize the repo
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       // Filter only blob (file) items from source tree
       const blobItems = sourceTree.tree.filter(item => item.type === "blob" && item.sha && item.path);
+      console.log(`Found ${blobItems.length} blobs in source tree`);
       
       if (blobItems.length === 0) {
         return res.json({ success: false, error: "Source repository has no files to copy" });
       }
 
       // Fetch all blobs in parallel batches for speed
-      const BATCH_SIZE = 20;
+      const BATCH_SIZE = 10;
       const newTreeItems: Array<{ path: string; mode: string; type: "blob"; sha: string }> = [];
+      
+      console.log(`Starting to copy ${blobItems.length} files from ${sourceRepo} to ${newRepoName}`);
       
       for (let i = 0; i < blobItems.length; i += BATCH_SIZE) {
         const batch = blobItems.slice(i, i + BATCH_SIZE);
+        console.log(`Processing batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(blobItems.length / BATCH_SIZE)}`);
+        
         const blobPromises = batch.map(async (item) => {
           try {
             // Get blob content from source
@@ -2470,15 +2480,19 @@ export async function registerRoutes(
               type: "blob" as const,
               sha: newBlob.sha,
             };
-          } catch (e) {
-            console.log(`Skipped: ${item.path}`);
+          } catch (e: any) {
+            console.error(`Failed to copy ${item.path}: ${e.message}`);
             return null;
           }
         });
         
         const results = await Promise.all(blobPromises);
-        newTreeItems.push(...results.filter((r): r is NonNullable<typeof r> => r !== null));
+        const successfulResults = results.filter((r): r is NonNullable<typeof r> => r !== null);
+        newTreeItems.push(...successfulResults);
+        console.log(`Batch complete: ${successfulResults.length}/${batch.length} files copied`);
       }
+      
+      console.log(`Total files copied: ${newTreeItems.length}/${blobItems.length}`);
 
       if (newTreeItems.length === 0) {
         return res.json({ success: false, error: "No files could be copied from source repository" });
