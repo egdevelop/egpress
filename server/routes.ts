@@ -2438,13 +2438,12 @@ export async function registerRoutes(
       // Wait for GitHub to initialize the repo
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Get the initial commit SHA from the new repo
-      const { data: newRepoRef } = await octokit.git.getRef({
+      // Get the new repo's actual default branch (might be 'main' or 'master' depending on user settings)
+      const { data: newRepoData } = await octokit.repos.get({
         owner: user.login,
         repo: newRepoName,
-        ref: "heads/main",
       });
-      const baseCommitSha = newRepoRef.object.sha;
+      const newRepoBranch = newRepoData.default_branch || "main";
 
       // Copy files one by one using the contents API (works with initialized repos)
       const filesToCopy = sourceTree.tree.filter(item => item.type === "blob" && item.path);
@@ -2469,7 +2468,7 @@ export async function registerRoutes(
                 owner: user.login,
                 repo: newRepoName,
                 path: item.path!,
-                ref: "main",
+                ref: newRepoBranch,
               });
               if (!Array.isArray(existingFile) && "sha" in existingFile) {
                 existingSha = existingFile.sha;
@@ -2485,7 +2484,7 @@ export async function registerRoutes(
               path: item.path!,
               message: `Add ${item.path}`,
               content: fileData.content.replace(/\n/g, ""),
-              branch: "main",
+              branch: newRepoBranch,
               ...(existingSha && { sha: existingSha }),
             });
             copiedCount++;
