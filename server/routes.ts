@@ -2412,25 +2412,14 @@ export async function registerRoutes(
         }
       }
 
-      // Create new repository without auto_init to avoid conflicts
-      const { data: newRepo } = await octokit.repos.createForAuthenticatedUser({
-        name: newRepoName,
-        description: description || `Astro blog created from ${sourceRepo}`,
-        auto_init: false,
-        private: false,
-      });
-
-      // Wait a bit for GitHub to create the repo
-      await new Promise(resolve => setTimeout(resolve, 1000));
-
-      // Get source repo's default branch
+      // Get source repo's default branch first
       const { data: sourceRepoData } = await octokit.repos.get({
         owner: sourceOwner,
         repo: sourceRepoName,
       });
       const defaultBranch = sourceRepoData.default_branch || "main";
 
-      // Get all files from source repo
+      // Get source tree
       const { data: sourceTree } = await octokit.git.getTree({
         owner: sourceOwner,
         repo: sourceRepoName,
@@ -2438,78 +2427,80 @@ export async function registerRoutes(
         recursive: "true",
       });
 
-      // Get the source commit
-      const { data: sourceCommit } = await octokit.repos.getCommit({
-        owner: sourceOwner,
-        repo: sourceRepoName,
-        ref: defaultBranch,
+      // Create new repository with auto_init to enable git operations
+      const { data: newRepo } = await octokit.repos.createForAuthenticatedUser({
+        name: newRepoName,
+        description: description || `Astro blog created from ${sourceRepo}`,
+        auto_init: true,
+        private: false,
       });
 
-      // Create blobs for each file and build tree
-      const treeItems: { path: string; mode: "100644" | "100755" | "040000" | "160000" | "120000"; type: "blob" | "tree" | "commit"; sha: string }[] = [];
+      // Wait for GitHub to initialize the repo
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      // Get the initial commit SHA from the new repo
+      const { data: newRepoRef } = await octokit.git.getRef({
+        owner: user.login,
+        repo: newRepoName,
+        ref: "heads/main",
+      });
+      const baseCommitSha = newRepoRef.object.sha;
+
+      // Copy files one by one using the contents API (works with initialized repos)
       const filesToCopy = sourceTree.tree.filter(item => item.type === "blob" && item.path);
+      let copiedCount = 0;
+      let skippedCount = 0;
       
       for (const item of filesToCopy) {
         try {
-          // Get file content from source as blob
-          const { data: blobData } = await octokit.git.getBlob({
+          // Get file content from source
+          const { data: fileData } = await octokit.repos.getContent({
             owner: sourceOwner,
             repo: sourceRepoName,
-            file_sha: item.sha!,
-          });
-
-          // Create blob in new repo
-          const { data: newBlob } = await octokit.git.createBlob({
-            owner: user.login,
-            repo: newRepoName,
-            content: blobData.content,
-            encoding: blobData.encoding as "base64" | "utf-8",
-          });
-
-          treeItems.push({
             path: item.path!,
-            mode: (item.mode as "100644" | "100755" | "040000" | "160000" | "120000") || "100644",
-            type: "blob",
-            sha: newBlob.sha,
+            ref: defaultBranch,
           });
+
+          if ("content" in fileData && !Array.isArray(fileData)) {
+            // Check if file already exists in new repo
+            let existingSha: string | undefined;
+            try {
+              const { data: existingFile } = await octokit.repos.getContent({
+                owner: user.login,
+                repo: newRepoName,
+                path: item.path!,
+                ref: "main",
+              });
+              if (!Array.isArray(existingFile) && "sha" in existingFile) {
+                existingSha = existingFile.sha;
+              }
+            } catch {
+              // File doesn't exist, that's fine
+            }
+
+            // Create/update file in new repo
+            await octokit.repos.createOrUpdateFileContents({
+              owner: user.login,
+              repo: newRepoName,
+              path: item.path!,
+              message: `Add ${item.path}`,
+              content: fileData.content.replace(/\n/g, ""),
+              branch: "main",
+              ...(existingSha && { sha: existingSha }),
+            });
+            copiedCount++;
+          }
         } catch (e: any) {
           console.log(`Skipped file: ${item.path} - ${e.message}`);
+          skippedCount++;
         }
       }
 
-      if (treeItems.length === 0) {
+      if (copiedCount === 0) {
         return res.json({ success: false, error: "No files could be copied from source repository" });
       }
 
-      // Create tree in new repo
-      const { data: newTree } = await octokit.git.createTree({
-        owner: user.login,
-        repo: newRepoName,
-        tree: treeItems,
-      });
-
-      // Create initial commit
-      const { data: newCommit } = await octokit.git.createCommit({
-        owner: user.login,
-        repo: newRepoName,
-        message: `Initial commit - cloned from ${sourceRepo}`,
-        tree: newTree.sha,
-      });
-
-      // Create main branch pointing to the commit
-      await octokit.git.createRef({
-        owner: user.login,
-        repo: newRepoName,
-        ref: "refs/heads/main",
-        sha: newCommit.sha,
-      });
-
-      // Set main as default branch
-      await octokit.repos.update({
-        owner: user.login,
-        repo: newRepoName,
-        default_branch: "main",
-      });
+      console.log(`Clone completed: ${copiedCount} files copied, ${skippedCount} skipped`);
 
       res.json({ 
         success: true, 
