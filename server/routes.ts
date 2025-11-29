@@ -2430,6 +2430,22 @@ export async function registerRoutes(
           });
 
           if ("content" in fileData && !Array.isArray(fileData)) {
+            // Check if file already exists in new repo (e.g., README.md from auto_init)
+            let existingSha: string | undefined;
+            try {
+              const { data: existingFile } = await octokit.repos.getContent({
+                owner: user.login,
+                repo: newRepoName,
+                path: item.path!,
+                ref: "main",
+              });
+              if (!Array.isArray(existingFile) && "sha" in existingFile) {
+                existingSha = existingFile.sha;
+              }
+            } catch {
+              // File doesn't exist, that's fine
+            }
+
             // Create/update file in new repo
             await octokit.repos.createOrUpdateFileContents({
               owner: user.login,
@@ -2438,6 +2454,7 @@ export async function registerRoutes(
               message: `Copy ${item.path} from ${sourceRepo}`,
               content: fileData.content.replace(/\n/g, ""), // GitHub API returns content with newlines
               branch: "main",
+              ...(existingSha && { sha: existingSha }),
             });
           }
         } catch (e: any) {
