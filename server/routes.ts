@@ -3828,10 +3828,48 @@ export async function registerRoutes(
   // ============== VERCEL INTEGRATION ==============
 
   // Get Vercel configuration status
-  app.get("/api/vercel/config", async (_req, res) => {
+  app.get("/api/vercel/config", requireAuth, async (req, res) => {
     try {
-      const config = await storage.getVercelConfig();
-      const project = await storage.getVercelProject();
+      let config = await storage.getVercelConfig();
+      let project = await storage.getVercelProject();
+      
+      // If not in memory, try to load from Supabase
+      if (!config?.token && req.session.githubUsername) {
+        const userSettings = await getUserSettings(req.session.githubUsername);
+        if (userSettings?.vercel_token) {
+          // Validate and load the token
+          try {
+            const { VercelService } = await import("./vercel");
+            const vercel = new VercelService(userSettings.vercel_token);
+            const user = await vercel.validateToken();
+            
+            config = {
+              token: userSettings.vercel_token,
+              username: user.username,
+            };
+            await storage.setVercelConfig(config);
+          } catch (tokenError) {
+            console.warn("Stored Vercel token is invalid:", tokenError);
+          }
+        }
+      }
+      
+      // If project not in memory, try to load from repository settings
+      if (!project && req.session.githubUsername) {
+        const repo = await storage.getRepository();
+        if (repo) {
+          const repoSettings = await getRepositorySettings(repo.fullName);
+          if (repoSettings?.vercel_project_id) {
+            project = {
+              id: repoSettings.vercel_project_id,
+              name: repoSettings.vercel_project_name || "",
+              framework: "astro",
+            };
+            await storage.setVercelProject(project);
+          }
+        }
+      }
+      
       res.json({
         success: true,
         data: {
