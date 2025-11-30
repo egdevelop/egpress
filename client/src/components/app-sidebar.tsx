@@ -162,6 +162,7 @@ export function AppSidebar() {
   const [showChangeRepo, setShowChangeRepo] = useState(false);
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
+  const [connectingRepoId, setConnectingRepoId] = useState<number | null>(null);
   const { toast } = useToast();
   const { githubUsername, logout } = useAuth();
   const [, setLocationNav] = useLocation();
@@ -188,14 +189,29 @@ export function AppSidebar() {
       return response.json();
     },
     onSuccess: (data) => {
+      setConnectingRepoId(null);
       if (data.success) {
         toast({
           title: "Repository Connected",
           description: `Successfully connected to ${data.data.fullName}`,
         });
+        
+        // Show Vercel auto-link result if applicable
+        if (data.vercelAutoLink) {
+          const { project, isNew, message } = data.vercelAutoLink;
+          toast({
+            title: isNew ? "Vercel Project Created" : "Vercel Project Linked",
+            description: message,
+          });
+          // Invalidate Vercel queries
+          queryClient.invalidateQueries({ queryKey: ["/api/vercel/config"] });
+          queryClient.invalidateQueries({ queryKey: ["/api/vercel/projects"] });
+        }
+        
         queryClient.invalidateQueries({ queryKey: ["/api/repository"] });
         queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
         queryClient.invalidateQueries({ queryKey: ["/api/files"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/search-console/config"] });
         setRepoSelectOpen(false);
       } else {
         toast({
@@ -206,6 +222,7 @@ export function AppSidebar() {
       }
     },
     onError: () => {
+      setConnectingRepoId(null);
       toast({
         title: "Connection Failed",
         description: "Failed to connect to repository",
@@ -259,8 +276,9 @@ export function AppSidebar() {
     },
   });
 
-  const handleSelectRepo = (fullName: string) => {
-    connectMutation.mutate(fullName);
+  const handleSelectRepo = (repo: GitHubRepo) => {
+    setConnectingRepoId(repo.id);
+    connectMutation.mutate(repo.fullName);
     setShowChangeRepo(false);
     setRepoManageOpen(false);
   };
@@ -325,26 +343,36 @@ export function AppSidebar() {
                       </CommandEmpty>
                       <CommandGroup>
                         <ScrollArea className="h-48">
-                          {filteredRepos.map((repo) => (
-                            <CommandItem
-                              key={repo.id}
-                              value={repo.fullName}
-                              onSelect={() => handleSelectRepo(repo.fullName)}
-                              className="cursor-pointer"
-                              data-testid={`repo-change-option-${repo.name}`}
-                            >
-                              <div className="flex items-center gap-2 flex-1 min-w-0">
-                                <Github className="w-4 h-4 shrink-0" />
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-sm font-medium truncate">{repo.name}</span>
-                                    {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                          {filteredRepos.map((repo) => {
+                            const isConnecting = connectingRepoId === repo.id;
+                            return (
+                              <CommandItem
+                                key={repo.id}
+                                value={repo.fullName}
+                                onSelect={() => handleSelectRepo(repo)}
+                                className="cursor-pointer"
+                                disabled={connectMutation.isPending}
+                                data-testid={`repo-change-option-${repo.name}`}
+                              >
+                                <div className="flex items-center gap-2 flex-1 min-w-0">
+                                  {isConnecting ? (
+                                    <RefreshCw className="w-4 h-4 shrink-0 animate-spin text-primary" />
+                                  ) : (
+                                    <Github className="w-4 h-4 shrink-0" />
+                                  )}
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-sm font-medium truncate">{repo.name}</span>
+                                      {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground truncate">
+                                      {isConnecting ? "Connecting..." : repo.owner}
+                                    </p>
                                   </div>
-                                  <p className="text-xs text-muted-foreground truncate">{repo.owner}</p>
                                 </div>
-                              </div>
-                            </CommandItem>
-                          ))}
+                              </CommandItem>
+                            );
+                          })}
                         </ScrollArea>
                       </CommandGroup>
                     </CommandList>
@@ -450,26 +478,36 @@ export function AppSidebar() {
                     </CommandEmpty>
                     <CommandGroup>
                       <ScrollArea className="h-48">
-                        {filteredRepos.map((repo) => (
-                          <CommandItem
-                            key={repo.id}
-                            value={repo.fullName}
-                            onSelect={() => handleSelectRepo(repo.fullName)}
-                            className="cursor-pointer"
-                            data-testid={`repo-option-${repo.name}`}
-                          >
-                            <div className="flex items-center gap-2 flex-1 min-w-0">
-                              <Github className="w-4 h-4 shrink-0" />
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-1">
-                                  <span className="text-sm font-medium truncate">{repo.name}</span>
-                                  {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                        {filteredRepos.map((repo) => {
+                          const isConnecting = connectingRepoId === repo.id;
+                          return (
+                            <CommandItem
+                              key={repo.id}
+                              value={repo.fullName}
+                              onSelect={() => handleSelectRepo(repo)}
+                              className="cursor-pointer"
+                              disabled={connectMutation.isPending}
+                              data-testid={`repo-option-${repo.name}`}
+                            >
+                              <div className="flex items-center gap-2 flex-1 min-w-0">
+                                {isConnecting ? (
+                                  <RefreshCw className="w-4 h-4 shrink-0 animate-spin text-primary" />
+                                ) : (
+                                  <Github className="w-4 h-4 shrink-0" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-sm font-medium truncate">{repo.name}</span>
+                                    {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                  </div>
+                                  <p className="text-xs text-muted-foreground truncate">
+                                    {isConnecting ? "Connecting..." : repo.owner}
+                                  </p>
                                 </div>
-                                <p className="text-xs text-muted-foreground truncate">{repo.owner}</p>
                               </div>
-                            </div>
-                          </CommandItem>
-                        ))}
+                            </CommandItem>
+                          );
+                        })}
                       </ScrollArea>
                     </CommandGroup>
                   </CommandList>

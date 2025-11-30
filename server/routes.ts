@@ -3,6 +3,7 @@ import { createServer, type Server } from "http";
 import crypto from "crypto";
 import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
+import { VercelService } from "./vercel";
 import { generateBlogPost } from "./gemini";
 import { 
   saveUserSettings, 
@@ -712,7 +713,41 @@ export async function registerRoutes(
         );
       }
 
-      res.json({ success: true, data: repository });
+      // Auto-link Vercel project if Vercel is configured
+      let vercelAutoLink = null;
+      const vercelConfig = await storage.getVercelConfig();
+      if (vercelConfig?.token) {
+        try {
+          const vercel = new VercelService(vercelConfig.token, vercelConfig.teamId);
+          const linkResult = await vercel.autoLinkProject(parsed.owner, parsed.repo);
+          
+          // Save the linked project
+          await storage.setVercelProject(linkResult.project);
+          
+          // Persist to Supabase
+          await updateRepositoryVercel(
+            repoData.full_name,
+            vercelConfig.token,
+            vercelConfig.teamId,
+            linkResult.project.id,
+            linkResult.project.name
+          );
+          
+          vercelAutoLink = {
+            project: linkResult.project,
+            isNew: linkResult.isNew,
+            message: linkResult.message,
+          };
+        } catch (vercelError) {
+          console.warn("Auto-link Vercel failed:", vercelError);
+        }
+      }
+
+      res.json({ 
+        success: true, 
+        data: repository,
+        vercelAutoLink,
+      });
     } catch (error: any) {
       console.error("Connect error:", error);
       res.json({ 
