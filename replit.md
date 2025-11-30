@@ -70,6 +70,9 @@ The system comprises a React-based frontend and an Express.js backend.
 - Fixed image preview to use GitHub raw URLs instead of non-existent local paths
 - Converted all image inputs (OG image, hero image, etc.) to file upload instead of URL input
 - Images are stored in /public/image and accessible at /image/filename after build
+- Fixed Gemini API key saving - key is now securely stored and can be reused without re-entering
+- Enhanced AI post generation with richer prompts, hero image suggestions, and better structured content
+- Updated project favicon to "EG" with orange theme color (#FF5D01)
 
 ## External Dependencies
 
