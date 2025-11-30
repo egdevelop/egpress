@@ -168,6 +168,10 @@ export default function AIGenerator() {
     queryKey: ["/api/ai/key"],
   });
 
+  const { data: authData } = useQuery<{ success: boolean; data: { authenticated: boolean; user?: { login: string; name?: string } } }>({
+    queryKey: ["/api/auth/status"],
+  });
+
   const form = useForm<AIFormValues>({
     resolver: zodResolver(aiFormSchema),
     defaultValues: {
@@ -310,6 +314,28 @@ export default function AIGenerator() {
         .replace(/[^a-z0-9]+/g, "-")
         .replace(/^-|-$/g, "");
       
+      let heroImagePath: string | undefined;
+      
+      // Upload generated image if available
+      if (generatedImageUrl) {
+        try {
+          const uploadResponse = await apiRequest("POST", "/api/upload-image-base64", {
+            imageData: generatedImageUrl,
+            mimeType: "image/png",
+            filename: slug,
+          });
+          const uploadResult = await uploadResponse.json();
+          if (uploadResult.success) {
+            heroImagePath = uploadResult.path;
+          }
+        } catch (err) {
+          console.error("Failed to upload hero image:", err);
+        }
+      }
+      
+      // Get author from GitHub user
+      const authorName = authData?.data?.user?.name || authData?.data?.user?.login || "Author";
+      
       const response = await apiRequest("POST", "/api/posts", {
         slug,
         title: generatedPost.title,
@@ -318,6 +344,8 @@ export default function AIGenerator() {
         tags: generatedPost.tags,
         draft: true,
         content: generatedPost.content,
+        heroImage: heroImagePath,
+        author: authorName,
         commitMessage: `Add AI-generated post: ${generatedPost.title}`,
       });
       return response.json();
@@ -326,7 +354,7 @@ export default function AIGenerator() {
       if (data.success) {
         toast({
           title: "Post Saved",
-          description: "The post has been saved as a draft",
+          description: "The post has been saved as a draft with hero image and author",
         });
         queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
         navigate(`/posts/${data.data.slug}`);
@@ -718,23 +746,39 @@ export default function AIGenerator() {
                     </div>
                   </div>
 
-                  <div className="flex gap-3 pt-4 border-t">
-                    <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-generated">
-                      {saveMutation.isPending ? (
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <Check className="w-4 h-4 mr-2" />
-                      )}
-                      Save as Draft
-                    </Button>
-                    <Button variant="outline" onClick={() => {
-                      setGeneratedPost(null);
-                      setGeneratedImageUrl(null);
-                      setImagePrompt("");
-                    }}>
-                      <X className="w-4 h-4 mr-2" />
-                      Discard
-                    </Button>
+                  <div className="flex flex-col gap-3 pt-4 border-t">
+                    <div className="flex gap-3">
+                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-generated">
+                        {saveMutation.isPending ? (
+                          <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                          <Check className="w-4 h-4 mr-2" />
+                        )}
+                        {saveMutation.isPending 
+                          ? (generatedImageUrl ? "Uploading image & saving..." : "Saving...")
+                          : "Save as Draft"
+                        }
+                      </Button>
+                      <Button variant="outline" onClick={() => {
+                        setGeneratedPost(null);
+                        setGeneratedImageUrl(null);
+                        setImagePrompt("");
+                      }}>
+                        <X className="w-4 h-4 mr-2" />
+                        Discard
+                      </Button>
+                    </div>
+                    {generatedImageUrl && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Check className="w-3 h-3 text-green-500" />
+                        Hero image ready - will be uploaded automatically when saving
+                      </p>
+                    )}
+                    {authData?.data?.user && (
+                      <p className="text-xs text-muted-foreground">
+                        Author: {authData.data.user.name || authData.data.user.login}
+                      </p>
+                    )}
                   </div>
 
                   {generatedPost.heroImage && (

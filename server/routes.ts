@@ -1410,6 +1410,76 @@ export async function registerRoutes(
     }
   });
 
+  // Upload base64 image to GitHub (for AI-generated images)
+  app.post("/api/upload-image-base64", requireAuth, async (req, res) => {
+    try {
+      const { imageData, mimeType, filename } = req.body;
+      
+      if (!imageData) {
+        return res.status(400).json({ success: false, error: "No image data provided" });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.status(400).json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+      
+      // Determine extension from mimeType
+      const extMap: Record<string, string> = {
+        'image/png': '.png',
+        'image/jpeg': '.jpg',
+        'image/jpg': '.jpg',
+        'image/gif': '.gif',
+        'image/webp': '.webp',
+      };
+      const ext = extMap[mimeType] || '.png';
+      
+      // Generate unique filename
+      const baseName = filename || `ai-hero-image`;
+      const sanitizedBaseName = baseName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+      
+      const timestamp = Date.now();
+      const randomSuffix = crypto.randomBytes(3).toString('hex');
+      const finalFilename = `${sanitizedBaseName}-${timestamp}-${randomSuffix}${ext}`;
+      const filePath = `public/image/${finalFilename}`;
+      
+      // Remove data URL prefix if present
+      let base64Data = imageData;
+      if (imageData.includes(',')) {
+        base64Data = imageData.split(',')[1];
+      }
+      
+      // Upload file to GitHub
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path: filePath,
+        message: `Upload AI-generated hero image: ${finalFilename}`,
+        content: base64Data,
+        branch: repo.activeBranch,
+      });
+      
+      // Return the public path
+      const publicPath = `/image/${finalFilename}`;
+      
+      res.json({ 
+        success: true, 
+        path: publicPath,
+        fullPath: filePath,
+        filename: finalFilename,
+      });
+    } catch (error: any) {
+      console.error("Base64 image upload error:", error);
+      res.status(500).json({ success: false, error: error.message || "Failed to upload image" });
+    }
+  });
+
   // Analyze CSS structure in repository (for debugging theme issues)
   app.get("/api/theme/analyze", async (req, res) => {
     try {
