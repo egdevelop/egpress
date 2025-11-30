@@ -213,16 +213,24 @@ export default function PostEditor() {
       const url = isNew ? "/api/posts" : `/api/posts/${slug}`;
       const method = isNew ? "POST" : "PUT";
       
-      let finalPubDate = data.pubDate;
-      if (originalPubDate) {
+      let finalPubDate: string;
+      const currentTime = new Date().toISOString().split("T")[1];
+      
+      const hasValidTime = (dateStr: string): boolean => {
+        if (!dateStr.includes("T")) return false;
+        const timePart = dateStr.split("T")[1];
+        return timePart && !timePart.startsWith("00:00:00");
+      };
+      
+      if (originalPubDate && hasValidTime(originalPubDate)) {
         const originalDatePart = originalPubDate.split("T")[0];
         if (data.pubDate === originalDatePart) {
           finalPubDate = originalPubDate;
         } else {
-          finalPubDate = new Date(data.pubDate + "T" + new Date().toISOString().split("T")[1]).toISOString();
+          finalPubDate = new Date(data.pubDate + "T" + currentTime).toISOString();
         }
       } else {
-        finalPubDate = new Date(data.pubDate + "T" + new Date().toISOString().split("T")[1]).toISOString();
+        finalPubDate = new Date(data.pubDate + "T" + currentTime).toISOString();
       }
       
       const response = await apiRequest(method, url, {
