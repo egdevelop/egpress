@@ -63,23 +63,22 @@ function useImageSize(imageUrl: string | null) {
     }
 
     setLoading(true);
-    const img = new Image();
     
     fetch(imageUrl, { method: 'HEAD' })
       .then(res => {
         const contentLength = res.headers.get('content-length');
         if (contentLength) {
           setSize(parseInt(contentLength, 10));
+          setLoading(false);
         } else {
           return fetch(imageUrl).then(r => r.blob()).then(blob => {
             setSize(blob.size);
+            setLoading(false);
           });
         }
       })
       .catch(() => {
         setSize(null);
-      })
-      .finally(() => {
         setLoading(false);
       });
   }, [imageUrl]);
