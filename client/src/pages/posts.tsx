@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { Link } from "wouter";
 import { Card, CardContent } from "@/components/ui/card";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,12 +41,121 @@ import {
   Calendar,
   Tag,
   FileText,
-  ArrowUpDown
+  ArrowUpDown,
+  HardDrive,
+  AlertCircle,
+  CheckCircle,
+  AlertTriangle
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import { getGitHubImageUrl } from "@/lib/utils";
+import { getGitHubImageUrl, formatBytes, getImageSeoStatus, type ImageSeoStatus } from "@/lib/utils";
 import type { Post, Repository } from "@shared/schema";
+
+function useImageSize(imageUrl: string | null) {
+  const [size, setSize] = useState<number | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!imageUrl) {
+      setSize(null);
+      return;
+    }
+
+    setLoading(true);
+    const img = new Image();
+    
+    fetch(imageUrl, { method: 'HEAD' })
+      .then(res => {
+        const contentLength = res.headers.get('content-length');
+        if (contentLength) {
+          setSize(parseInt(contentLength, 10));
+        } else {
+          return fetch(imageUrl).then(r => r.blob()).then(blob => {
+            setSize(blob.size);
+          });
+        }
+      })
+      .catch(() => {
+        setSize(null);
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, [imageUrl]);
+
+  return { size, loading };
+}
+
+function ImageSizeIndicator({ size, loading }: { size: number | null; loading: boolean }) {
+  if (loading) {
+    return (
+      <Badge variant="outline" className="text-xs gap-1 border-muted-foreground/30">
+        <HardDrive className="w-3 h-3" />
+        ...
+      </Badge>
+    );
+  }
+
+  if (size === null) return null;
+
+  const status = getImageSeoStatus(size);
+  const sizeText = formatBytes(size);
+  
+  const getIcon = () => {
+    switch (status) {
+      case 'good':
+        return <CheckCircle className="w-3 h-3" />;
+      case 'warning':
+        return <AlertTriangle className="w-3 h-3" />;
+      case 'critical':
+        return <AlertCircle className="w-3 h-3" />;
+    }
+  };
+
+  const getTooltip = () => {
+    switch (status) {
+      case 'good':
+        return 'Great! Image is optimized for fast loading';
+      case 'warning':
+        return 'Image could be smaller. Consider optimizing for better SEO';
+      case 'critical':
+        return 'Image is too large! This will hurt page speed and SEO';
+    }
+  };
+
+  const getBadgeClass = () => {
+    switch (status) {
+      case 'good':
+        return 'bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400';
+      case 'warning':
+        return 'bg-yellow-500/10 text-yellow-600 border-yellow-500/30 dark:text-yellow-400';
+      case 'critical':
+        return 'bg-red-500/10 text-red-600 border-red-500/30 dark:text-red-400';
+    }
+  };
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <Badge 
+          variant="outline" 
+          className={`text-xs gap-1 cursor-help ${getBadgeClass()}`}
+          data-testid="badge-image-size"
+        >
+          {getIcon()}
+          {sizeText}
+        </Badge>
+      </TooltipTrigger>
+      <TooltipContent>
+        <p>{getTooltip()}</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          Target: under 100KB for best performance
+        </p>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
 
 type SortOption = "date-desc" | "date-asc" | "title-asc" | "title-desc";
 type FilterOption = "all" | "published" | "draft";
@@ -62,6 +172,7 @@ function PostCard({
   branch?: string;
 }) {
   const imageUrl = getGitHubImageUrl(post.heroImage, repoFullName, branch || "main");
+  const { size, loading } = useImageSize(imageUrl);
   
   return (
     <Card className="group hover-elevate">
@@ -93,6 +204,7 @@ function PostCard({
                       Published
                     </Badge>
                   )}
+                  {imageUrl && <ImageSizeIndicator size={size} loading={loading} />}
                 </div>
                 <p className="text-sm text-muted-foreground line-clamp-2 mb-3">
                   {post.description || "No description provided"}
