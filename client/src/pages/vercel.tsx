@@ -724,6 +724,10 @@ export default function VercelPage() {
                     <Globe className="w-4 h-4" />
                     Domains
                   </TabsTrigger>
+                  <TabsTrigger value="smart-deploy" className="flex items-center gap-2">
+                    <Zap className="w-4 h-4" />
+                    Smart Deploy
+                  </TabsTrigger>
                   <TabsTrigger value="settings" className="flex items-center gap-2">
                     <Settings className="w-4 h-4" />
                     Settings
@@ -1214,6 +1218,151 @@ export default function VercelPage() {
                           ))}
                         </div>
                       )}
+                    </CardContent>
+                  </Card>
+                </TabsContent>
+
+                <TabsContent value="smart-deploy" className="space-y-6">
+                  <div className="grid gap-6 lg:grid-cols-2">
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Settings className="w-5 h-5" />
+                          Deployment Settings
+                        </CardTitle>
+                        <CardDescription>
+                          Control how and when deployments happen
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-6">
+                        <div className="space-y-3">
+                          <h4 className="text-sm font-medium">Deployment Tips</h4>
+                          <div className="space-y-2 text-sm text-muted-foreground">
+                            <div className="flex items-start gap-2">
+                              <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                              <span>Create multiple posts with Bulk AI Generator before deploying</span>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                              <span>Edit all theme/branding settings at once, then deploy</span>
+                            </div>
+                            <div className="flex items-start gap-2">
+                              <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                              <span>Use scheduled deploys for content calendars</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-4 rounded-lg bg-muted/30 border">
+                          <div className="flex items-center gap-3">
+                            <Info className="w-5 h-5 text-muted-foreground" />
+                            <div>
+                              <p className="text-sm font-medium">Smart Deploy Strategy</p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Collect multiple changes before deploying to reduce Vercel build minutes usage and bundle posts into one deployment.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                          <Clock className="w-5 h-5" />
+                          Deployment Strategy
+                        </CardTitle>
+                        <CardDescription>
+                          Best practices for efficient deployments
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        <div className="space-y-3">
+                          <div className="p-4 rounded-md border bg-muted/30">
+                            <h4 className="font-medium flex items-center gap-2 mb-2">
+                              <Badge variant="secondary">1</Badge>
+                              Bulk Create Content
+                            </h4>
+                            <p className="text-sm text-muted-foreground">
+                              Use the Bulk AI Generator to create 5-10 posts at once. 
+                              All posts are saved to GitHub but not deployed yet.
+                            </p>
+                          </div>
+
+                          <div className="p-4 rounded-md border bg-muted/30">
+                            <h4 className="font-medium flex items-center gap-2 mb-2">
+                              <Badge variant="secondary">2</Badge>
+                              Review & Organize
+                            </h4>
+                            <p className="text-sm text-muted-foreground">
+                              Edit titles, adjust categories, and finalize content. 
+                              Changes are committed to GitHub incrementally.
+                            </p>
+                          </div>
+
+                          <div className="p-4 rounded-md border bg-muted/30">
+                            <h4 className="font-medium flex items-center gap-2 mb-2">
+                              <Badge variant="secondary">3</Badge>
+                              Single Deploy
+                            </h4>
+                            <p className="text-sm text-muted-foreground">
+                              When ready, use the "Deploy Now" button above. 
+                              All your changes go live together.
+                            </p>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <Rocket className="w-5 h-5" />
+                        Vercel Auto-Deploy Control
+                      </CardTitle>
+                      <CardDescription>
+                        How to control automatic deployments in Vercel
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="grid gap-4 md:grid-cols-2">
+                        <div className="p-4 rounded-md border">
+                          <h4 className="font-medium mb-2">Disable Auto-Deploy</h4>
+                          <ol className="text-sm text-muted-foreground space-y-2">
+                            <li className="flex gap-2">
+                              <span className="text-primary font-medium">1.</span>
+                              Go to Vercel Dashboard and select your Project
+                            </li>
+                            <li className="flex gap-2">
+                              <span className="text-primary font-medium">2.</span>
+                              Settings then Git then Build & Development
+                            </li>
+                            <li className="flex gap-2">
+                              <span className="text-primary font-medium">3.</span>
+                              Turn off "Automatically deploy on push"
+                            </li>
+                            <li className="flex gap-2">
+                              <span className="text-primary font-medium">4.</span>
+                              Use "Deploy Now" button in Deployments tab
+                            </li>
+                          </ol>
+                        </div>
+
+                        <div className="p-4 rounded-md border">
+                          <h4 className="font-medium mb-2">Ignored Build Step</h4>
+                          <p className="text-sm text-muted-foreground mb-3">
+                            Add this to Vercel settings to skip deploys for drafts:
+                          </p>
+                          <code className="block p-2 rounded bg-muted text-xs font-mono">
+                            git diff HEAD^ HEAD --quiet -- src/content/blog/
+                          </code>
+                          <p className="text-xs text-muted-foreground mt-2">
+                            This skips deploy if only draft posts changed.
+                          </p>
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
                 </TabsContent>

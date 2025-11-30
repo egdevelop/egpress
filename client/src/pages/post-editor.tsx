@@ -43,6 +43,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { 
   ArrowLeft, 
   Save, 
@@ -87,21 +96,15 @@ const postFormSchema = z.object({
 
 type PostFormValues = z.infer<typeof postFormSchema>;
 
-interface ImageOptimizerProps {
+interface ImageSizeDisplayProps {
   imageUrl: string | null;
-  onOptimized: (newPath: string) => void;
   repoFullName?: string;
   branch?: string;
 }
 
-function ImageOptimizer({ imageUrl, onOptimized, repoFullName, branch }: ImageOptimizerProps) {
+function ImageSizeDisplay({ imageUrl, repoFullName, branch }: ImageSizeDisplayProps) {
   const [imageSize, setImageSize] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
-  const [optimizing, setOptimizing] = useState(false);
-  const [quality, setQuality] = useState(0.7);
-  const [format, setFormat] = useState<'webp' | 'jpeg'>('webp');
-  const [showOptimizer, setShowOptimizer] = useState(false);
-  const { toast } = useToast();
 
   useEffect(() => {
     if (!imageUrl) {
@@ -135,129 +138,13 @@ function ImageOptimizer({ imageUrl, onOptimized, repoFullName, branch }: ImageOp
       });
   }, [imageUrl, repoFullName, branch]);
 
-  const handleOptimize = useCallback(async () => {
-    if (!imageUrl || !repoFullName) return;
-
-    const fullUrl = getGitHubImageUrl(imageUrl, repoFullName, branch);
-    if (!fullUrl) return;
-
-    setOptimizing(true);
-    try {
-      const response = await fetch(fullUrl);
-      const blob = await response.blob();
-      
-      const img = new Image();
-      const loadPromise = new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error("Failed to load image"));
-      });
-      img.src = URL.createObjectURL(blob);
-      await loadPromise;
-
-      const canvas = document.createElement('canvas');
-      const maxDimension = 1200;
-      let width = img.width;
-      let height = img.height;
-
-      if (width > maxDimension || height > maxDimension) {
-        if (width > height) {
-          height = (height / width) * maxDimension;
-          width = maxDimension;
-        } else {
-          width = (width / height) * maxDimension;
-          height = maxDimension;
-        }
-      }
-
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error("Failed to get canvas context");
-      
-      ctx.drawImage(img, 0, 0, width, height);
-
-      const mimeType = format === 'webp' ? 'image/webp' : 'image/jpeg';
-      const optimizedBlob = await new Promise<Blob>((resolve, reject) => {
-        canvas.toBlob(
-          (blob) => {
-            if (blob) resolve(blob);
-            else reject(new Error("Failed to create blob"));
-          },
-          mimeType,
-          quality
-        );
-      });
-
-      URL.revokeObjectURL(img.src);
-
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const result = reader.result as string;
-          resolve(result.split(',')[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(optimizedBlob);
-      });
-
-      const originalName = imageUrl.split('/').pop()?.replace(/\.[^.]+$/, '') || 'optimized';
-      const extension = format === 'webp' ? 'webp' : 'jpg';
-      const newFilename = `${originalName}-optimized.${extension}`;
-
-      const uploadResponse = await fetch('/api/upload-image-base64', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageData: base64,
-          filename: newFilename,
-          mimeType,
-        }),
-        credentials: 'include',
-      });
-
-      const result = await uploadResponse.json();
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Upload failed');
-      }
-
-      onOptimized(result.path);
-      setShowOptimizer(false);
-      
-      if (imageSize && imageSize > optimizedBlob.size) {
-        const savings = Math.round((1 - optimizedBlob.size / imageSize) * 100);
-        toast({
-          title: "Image Optimized",
-          description: `Saved ${savings}% (${formatBytes(imageSize)} to ${formatBytes(optimizedBlob.size)})`,
-        });
-      } else if (imageSize && optimizedBlob.size >= imageSize) {
-        toast({
-          title: "Image Converted",
-          description: `Format changed (${formatBytes(optimizedBlob.size)}). Original was already well-optimized.`,
-        });
-      } else {
-        toast({
-          title: "Image Optimized",
-          description: `New size: ${formatBytes(optimizedBlob.size)}`,
-        });
-      }
-    } catch (error: any) {
-      toast({
-        title: "Optimization Failed",
-        description: error.message || "Failed to optimize image",
-        variant: "destructive",
-      });
-    } finally {
-      setOptimizing(false);
-    }
-  }, [imageUrl, repoFullName, branch, quality, format, imageSize, onOptimized, toast]);
-
   if (!imageUrl) return null;
 
-  const status = imageSize ? getImageSeoStatus(imageSize) : null;
+  const seoStatus = imageSize ? getImageSeoStatus(imageSize) : null;
   
   const getStatusIcon = () => {
-    switch (status) {
+    if (!seoStatus) return <HardDrive className="w-4 h-4 text-muted-foreground" />;
+    switch (seoStatus.status) {
       case 'good':
         return <CheckCircle className="w-4 h-4 text-green-600 dark:text-green-400" />;
       case 'warning':
@@ -270,7 +157,8 @@ function ImageOptimizer({ imageUrl, onOptimized, repoFullName, branch }: ImageOp
   };
 
   const getBadgeClass = () => {
-    switch (status) {
+    if (!seoStatus) return '';
+    switch (seoStatus.status) {
       case 'good':
         return 'bg-green-500/10 text-green-600 border-green-500/30 dark:text-green-400';
       case 'warning':
@@ -283,117 +171,32 @@ function ImageOptimizer({ imageUrl, onOptimized, repoFullName, branch }: ImageOp
   };
 
   return (
-    <div className="space-y-3 mt-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          {loading ? (
-            <Badge variant="outline" className="text-xs gap-1">
-              <Loader2 className="w-3 h-3 animate-spin" />
-              Loading...
-            </Badge>
-          ) : imageSize ? (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Badge 
-                  variant="outline" 
-                  className={`text-xs gap-1 cursor-help ${getBadgeClass()}`}
-                  data-testid="badge-hero-image-size"
-                >
-                  {getStatusIcon()}
-                  {formatBytes(imageSize)}
-                </Badge>
-              </TooltipTrigger>
-              <TooltipContent>
-                <p>
-                  {status === 'good' && 'Great! Image is optimized for fast loading'}
-                  {status === 'warning' && 'Image could be smaller for better SEO'}
-                  {status === 'critical' && 'Image is too large! This hurts page speed'}
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Target: under 100KB for best performance
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          ) : null}
-        </div>
-        
-        {!loading && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setShowOptimizer(!showOptimizer)}
-            className="gap-1"
-            data-testid="button-show-optimizer"
-          >
-            <Zap className="w-3 h-3" />
-            {showOptimizer ? 'Hide Optimizer' : 'Optimize'}
-          </Button>
-        )}
-      </div>
-
-      {showOptimizer && (
-        <Card className="border-dashed">
-          <CardContent className="pt-4 space-y-4">
-            <div className="text-sm font-medium flex items-center gap-2">
-              <Zap className="w-4 h-4 text-primary" />
-              Image Optimization
-            </div>
-
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">Quality</span>
-                <span className="font-medium">{Math.round(quality * 100)}%</span>
-              </div>
-              <Slider
-                value={[quality * 100]}
-                onValueChange={([v]) => setQuality(v / 100)}
-                min={30}
-                max={100}
-                step={5}
-                className="w-full"
-                data-testid="slider-quality"
-              />
-              <p className="text-xs text-muted-foreground">
-                Lower quality = smaller file size
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm text-muted-foreground">Format</label>
-              <Select value={format} onValueChange={(v) => setFormat(v as 'webp' | 'jpeg')}>
-                <SelectTrigger data-testid="select-format">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="webp">WebP (Recommended)</SelectItem>
-                  <SelectItem value="jpeg">JPEG</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <Button
-              type="button"
-              onClick={handleOptimize}
-              disabled={optimizing}
-              className="w-full gap-2"
-              data-testid="button-optimize-image"
+    <div className="mt-2">
+      {loading ? (
+        <Badge variant="outline" className="text-xs gap-1">
+          <Loader2 className="w-3 h-3 animate-spin" />
+          Checking size...
+        </Badge>
+      ) : imageSize ? (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Badge 
+              variant="outline" 
+              className={`text-xs gap-1 cursor-help ${getBadgeClass()}`}
+              data-testid="badge-hero-image-size"
             >
-              {optimizing ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  Optimizing...
-                </>
-              ) : (
-                <>
-                  <Zap className="w-4 h-4" />
-                  Optimize & Replace
-                </>
-              )}
-            </Button>
-          </CardContent>
-        </Card>
-      )}
+              {getStatusIcon()}
+              {formatBytes(imageSize)}
+            </Badge>
+          </TooltipTrigger>
+          <TooltipContent>
+            <p>{seoStatus?.message}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Target: under 200KB for best performance
+            </p>
+          </TooltipContent>
+        </Tooltip>
+      ) : null}
     </div>
   );
 }
@@ -472,6 +275,10 @@ export default function PostEditor() {
   const [showPreview, setShowPreview] = useState(true);
   const [commitMessage, setCommitMessage] = useState("");
   const [originalPubDate, setOriginalPubDate] = useState<string | null>(null);
+  const [showOptimizeDialog, setShowOptimizeDialog] = useState(false);
+  const [optimizing, setOptimizing] = useState(false);
+  const [optimizeQuality, setOptimizeQuality] = useState(70);
+  const [optimizeFormat, setOptimizeFormat] = useState<'webp' | 'jpeg'>('webp');
   const { toast } = useToast();
   const { theme } = useTheme();
 
@@ -599,6 +406,113 @@ export default function PostEditor() {
     saveMutation.mutate(data);
   };
 
+  const handleOptimizeImage = useCallback(async () => {
+    const heroImage = form.getValues("heroImage");
+    if (!heroImage || !repoData?.data) return;
+
+    const fullUrl = getGitHubImageUrl(heroImage, repoData.data.fullName, repoData.data.activeBranch);
+    if (!fullUrl) return;
+
+    setOptimizing(true);
+    try {
+      const response = await fetch(fullUrl);
+      const blob = await response.blob();
+      const originalSize = blob.size;
+      
+      const img = new Image();
+      const loadPromise = new Promise<void>((resolve, reject) => {
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error("Failed to load image"));
+      });
+      img.src = URL.createObjectURL(blob);
+      await loadPromise;
+
+      const canvas = document.createElement('canvas');
+      const maxDimension = 1200;
+      let width = img.width;
+      let height = img.height;
+
+      if (width > maxDimension || height > maxDimension) {
+        if (width > height) {
+          height = (height / width) * maxDimension;
+          width = maxDimension;
+        } else {
+          width = (width / height) * maxDimension;
+          height = maxDimension;
+        }
+      }
+
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error("Failed to get canvas context");
+      
+      ctx.drawImage(img, 0, 0, width, height);
+
+      const mimeType = optimizeFormat === 'webp' ? 'image/webp' : 'image/jpeg';
+      const optimizedBlob = await new Promise<Blob>((resolve, reject) => {
+        canvas.toBlob(
+          (blob) => {
+            if (blob) resolve(blob);
+            else reject(new Error("Failed to create blob"));
+          },
+          mimeType,
+          optimizeQuality / 100
+        );
+      });
+
+      URL.revokeObjectURL(img.src);
+
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const result = reader.result as string;
+          resolve(result.split(',')[1]);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(optimizedBlob);
+      });
+
+      const originalName = heroImage.split('/').pop()?.replace(/\.[^.]+$/, '') || 'optimized';
+      const extension = optimizeFormat === 'webp' ? 'webp' : 'jpg';
+      const newFilename = `${originalName}-optimized.${extension}`;
+
+      const uploadResponse = await fetch('/api/upload-image-base64', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageData: base64,
+          filename: newFilename,
+          mimeType,
+        }),
+        credentials: 'include',
+      });
+
+      const result = await uploadResponse.json();
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Upload failed');
+      }
+
+      form.setValue("heroImage", result.path);
+      setShowOptimizeDialog(false);
+      
+      const savings = Math.round((1 - optimizedBlob.size / originalSize) * 100);
+      toast({
+        title: "Image Optimized",
+        description: `Saved ${savings}% (${formatBytes(originalSize)} to ${formatBytes(optimizedBlob.size)})`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Optimization Failed",
+        description: error.message || "Failed to optimize image",
+        variant: "destructive",
+      });
+    } finally {
+      setOptimizing(false);
+    }
+  }, [form, repoData?.data, optimizeQuality, optimizeFormat, toast]);
+
   // Auto-generate slug from title
   const watchTitle = form.watch("title");
   useEffect(() => {
@@ -681,6 +595,91 @@ export default function PostEditor() {
               </>
             )}
           </Button>
+
+          {form.watch("heroImage") && (
+            <Dialog open={showOptimizeDialog} onOpenChange={setShowOptimizeDialog}>
+              <DialogTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="gap-1"
+                  data-testid="button-optimize-header"
+                >
+                  <Zap className="w-4 h-4" />
+                  Optimize
+                </Button>
+              </DialogTrigger>
+              <DialogContent>
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <Zap className="w-5 h-5 text-primary" />
+                    Optimize Hero Image
+                  </DialogTitle>
+                  <DialogDescription>
+                    Reduce image file size for better SEO and faster page loads.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-6 py-4">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Quality</span>
+                      <span className="font-medium">{optimizeQuality}%</span>
+                    </div>
+                    <Slider
+                      value={[optimizeQuality]}
+                      onValueChange={([v]) => setOptimizeQuality(v)}
+                      min={30}
+                      max={100}
+                      step={5}
+                      className="w-full"
+                      data-testid="slider-optimize-quality"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Lower quality = smaller file size. 70% is recommended for web.
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Format</label>
+                    <Select value={optimizeFormat} onValueChange={(v) => setOptimizeFormat(v as 'webp' | 'jpeg')}>
+                      <SelectTrigger data-testid="select-optimize-format">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="webp">WebP (Recommended)</SelectItem>
+                        <SelectItem value="jpeg">JPEG</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      WebP offers better compression and is supported by all modern browsers.
+                    </p>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setShowOptimizeDialog(false)}>
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleOptimizeImage}
+                    disabled={optimizing}
+                    data-testid="button-confirm-optimize"
+                  >
+                    {optimizing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Optimizing...
+                      </>
+                    ) : (
+                      <>
+                        <Zap className="w-4 h-4 mr-2" />
+                        Optimize & Replace
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+          )}
 
           <Button
             onClick={form.handleSubmit(onSubmit)}
@@ -858,9 +857,8 @@ export default function PostEditor() {
                               Upload a featured image for your post
                             </FormDescription>
                             <FormMessage />
-                            <ImageOptimizer
+                            <ImageSizeDisplay
                               imageUrl={field.value || null}
-                              onOptimized={field.onChange}
                               repoFullName={repository?.fullName}
                               branch={repository?.activeBranch}
                             />

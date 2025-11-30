@@ -1498,6 +1498,48 @@ export async function registerRoutes(
     }
   });
 
+  // List all images in the repository (for bulk optimization)
+  app.get("/api/images", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+
+      // Get the tree from the repository
+      const { data: tree } = await octokit.git.getTree({
+        owner: repo.owner,
+        repo: repo.name,
+        tree_sha: repo.activeBranch,
+        recursive: "true",
+      });
+
+      // Filter for image files in public/image directory
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+      const images = tree.tree
+        .filter(item => {
+          if (item.type !== 'blob' || !item.path) return false;
+          const isInPublicImage = item.path.startsWith('public/image/') || item.path.startsWith('public/images/');
+          const hasImageExtension = imageExtensions.some(ext => item.path!.toLowerCase().endsWith(ext));
+          return isInPublicImage && hasImageExtension;
+        })
+        .map(item => ({
+          path: item.path!,
+          sha: item.sha,
+          size: item.size || 0,
+          publicPath: item.path!.replace(/^public/, ''),
+          name: item.path!.split('/').pop() || '',
+        }));
+
+      res.json({ success: true, data: images });
+    } catch (error: any) {
+      console.error("List images error:", error);
+      res.json({ success: false, error: error.message || "Failed to list images" });
+    }
+  });
+
   // Analyze CSS structure in repository (for debugging theme issues)
   app.get("/api/theme/analyze", async (req, res) => {
     try {

@@ -1,36 +1,32 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Progress } from "@/components/ui/progress";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { 
   Zap, 
   Image, 
-  Settings, 
-  Upload,
-  Download,
-  Trash2,
   Check,
   AlertCircle,
   RefreshCw,
   HardDrive,
   Gauge,
   FileImage,
-  Rocket,
-  Clock,
-  GitCommit,
   ChevronRight,
   Info,
   X,
-  Play
+  Play,
+  CheckCircle,
+  AlertTriangle,
+  FolderOpen
 } from "lucide-react";
 import { 
   optimizeImage, 
@@ -41,26 +37,28 @@ import {
   type OptimizedImage,
   type OptimizeOptions
 } from "@/lib/image-utils";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository, BlogPost } from "@shared/schema";
+import { getImageSeoStatus, type ImageSeoStatus } from "@/lib/utils";
+import type { Repository } from "@shared/schema";
 
-interface BatchImage {
-  id: string;
-  file: File;
+interface RepoImage {
+  path: string;
+  sha: string;
+  size: number;
+  publicPath: string;
   name: string;
-  originalSize: number;
-  status: 'pending' | 'processing' | 'completed' | 'error';
-  optimized?: OptimizedImage;
-  error?: string;
 }
 
-interface PendingChange {
-  type: 'new' | 'edit' | 'delete';
-  title: string;
-  slug: string;
-  timestamp: Date;
+interface ProcessedImage {
+  id: string;
+  original: RepoImage;
+  status: 'pending' | 'processing' | 'completed' | 'error' | 'skipped';
+  selected: boolean;
+  optimized?: OptimizedImage;
+  error?: string;
+  seoStatus: ImageSeoStatus;
 }
 
 export default function PerformancePage() {
@@ -72,24 +70,22 @@ export default function PerformancePage() {
   const [customMaxHeight, setCustomMaxHeight] = useState(800);
   const [customFormat, setCustomFormat] = useState<'image/webp' | 'image/jpeg' | 'image/png'>('image/webp');
   
-  const [batchImages, setBatchImages] = useState<BatchImage[]>([]);
-  const [isBatchProcessing, setIsBatchProcessing] = useState(false);
-  const [batchProgress, setBatchProgress] = useState(0);
-  
-  const [pendingChanges, setPendingChanges] = useState<PendingChange[]>([]);
-  const [deployBatching, setDeployBatching] = useState(true);
-  const [deployConfirmOpen, setDeployConfirmOpen] = useState(false);
+  const [processedImages, setProcessedImages] = useState<ProcessedImage[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processProgress, setProcessProgress] = useState(0);
+  const [imagesScanned, setImagesScanned] = useState(false);
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
   });
 
-  const { data: postsData } = useQuery<{ success: boolean; data: BlogPost[] }>({
-    queryKey: ["/api/posts"],
+  const { data: imagesData, isLoading: imagesLoading, refetch: refetchImages } = useQuery<{ success: boolean; data: RepoImage[] }>({
+    queryKey: ["/api/images"],
     enabled: !!repoData?.data,
   });
 
   const repository = repoData?.data;
+  const repoImages = imagesData?.data || [];
 
   const getCurrentOptions = useCallback((): OptimizeOptions => {
     if (selectedPreset === 'custom') {
@@ -103,101 +99,165 @@ export default function PerformancePage() {
     return getPresetOptions(selectedPreset);
   }, [selectedPreset, customMaxWidth, customMaxHeight, customQuality, customFormat]);
 
-  const handleFilesSelected = useCallback((files: FileList | null) => {
-    if (!files) return;
-    
-    const newImages: BatchImage[] = Array.from(files)
-      .filter(file => file.type.startsWith('image/'))
-      .map(file => ({
-        id: crypto.randomUUID(),
-        file,
-        name: file.name,
-        originalSize: file.size,
-        status: 'pending' as const,
-      }));
-    
-    setBatchImages(prev => [...prev, ...newImages]);
+  const scanImages = useCallback(() => {
+    const processed: ProcessedImage[] = repoImages.map(img => ({
+      id: img.sha,
+      original: img,
+      status: 'pending' as const,
+      selected: img.size > 200 * 1024,
+      seoStatus: getImageSeoStatus(img.size),
+    }));
+    setProcessedImages(processed);
+    setImagesScanned(true);
+  }, [repoImages]);
+
+  useEffect(() => {
+    if (repoImages.length > 0 && !imagesScanned) {
+      scanImages();
+    }
+  }, [repoImages, imagesScanned, scanImages]);
+
+  const toggleImageSelection = useCallback((id: string) => {
+    setProcessedImages(prev => prev.map(img =>
+      img.id === id ? { ...img, selected: !img.selected } : img
+    ));
   }, []);
 
-  const removeFromBatch = useCallback((id: string) => {
-    setBatchImages(prev => prev.filter(img => img.id !== id));
+  const selectAll = useCallback((selected: boolean) => {
+    setProcessedImages(prev => prev.map(img => ({ ...img, selected })));
   }, []);
 
-  const clearBatch = useCallback(() => {
-    setBatchImages([]);
-    setBatchProgress(0);
+  const selectNeedOptimization = useCallback(() => {
+    setProcessedImages(prev => prev.map(img => ({
+      ...img,
+      selected: img.seoStatus.status !== 'good',
+    })));
   }, []);
 
-  const processBatch = useCallback(async () => {
-    if (batchImages.length === 0) return;
-    
-    setIsBatchProcessing(true);
-    setBatchProgress(0);
-    
+  const optimizeAllSelected = useCallback(async () => {
+    const selectedImages = processedImages.filter(img => img.selected && img.status === 'pending');
+    if (selectedImages.length === 0) {
+      toast({
+        title: "No images selected",
+        description: "Please select images to optimize",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+    setProcessProgress(0);
     const options = getCurrentOptions();
-    const total = batchImages.filter(img => img.status === 'pending').length;
     let processed = 0;
-    
-    for (const image of batchImages) {
-      if (image.status !== 'pending') continue;
-      
-      setBatchImages(prev => prev.map(img => 
+
+    for (const image of selectedImages) {
+      setProcessedImages(prev => prev.map(img =>
         img.id === image.id ? { ...img, status: 'processing' } : img
       ));
-      
+
       try {
-        const optimized = await optimizeImage(image.file, options);
+        const fullUrl = `https://raw.githubusercontent.com/${repository?.fullName}/${repository?.activeBranch}/${image.original.path}`;
         
-        setBatchImages(prev => prev.map(img => 
-          img.id === image.id ? { ...img, status: 'completed', optimized } : img
-        ));
+        const response = await fetch(fullUrl);
+        if (!response.ok) {
+          throw new Error(`Failed to fetch image: ${response.statusText}`);
+        }
+        
+        const blob = await response.blob();
+        const file = new File([blob], image.original.name, { type: blob.type });
+        
+        const optimized = await optimizeImage(file, options);
+        
+        if (optimized.optimizedSize >= image.original.size) {
+          setProcessedImages(prev => prev.map(img =>
+            img.id === image.id ? { ...img, status: 'skipped', error: 'Already optimized' } : img
+          ));
+        } else {
+          const mimeType = options.format || 'image/webp';
+          const ext = mimeType === 'image/webp' ? 'webp' : mimeType === 'image/jpeg' ? 'jpg' : 'png';
+          const originalName = image.original.name.replace(/\.[^.]+$/, '');
+          const newFilename = `${originalName}-optimized.${ext}`;
+
+          const base64 = optimized.dataUrl.split(',')[1];
+          
+          const uploadResponse = await fetch('/api/upload-image-base64', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageData: base64,
+              filename: newFilename,
+              mimeType,
+            }),
+            credentials: 'include',
+          });
+
+          const result = await uploadResponse.json();
+          
+          if (!result.success) {
+            throw new Error(result.error || 'Upload failed');
+          }
+
+          setProcessedImages(prev => prev.map(img =>
+            img.id === image.id ? { ...img, status: 'completed', optimized } : img
+          ));
+        }
       } catch (error: any) {
-        setBatchImages(prev => prev.map(img => 
+        setProcessedImages(prev => prev.map(img =>
           img.id === image.id ? { ...img, status: 'error', error: error.message } : img
         ));
       }
-      
+
       processed++;
-      setBatchProgress((processed / total) * 100);
+      setProcessProgress((processed / selectedImages.length) * 100);
     }
+
+    setIsProcessing(false);
     
-    setIsBatchProcessing(false);
-    
-    const completed = batchImages.filter(img => img.status === 'completed' || img.optimized).length + 
-      batchImages.filter(img => img.status === 'pending').length;
-    
-    toast({
-      title: "Batch Processing Complete",
-      description: `Optimized ${processed} images`,
+    setProcessedImages(prev => {
+      const updated = [...prev];
+      let completedCount = 0;
+      let skippedCount = 0;
+      let errorCount = 0;
+      
+      updated.forEach(img => {
+        if (img.status === 'completed') completedCount++;
+        else if (img.status === 'skipped') skippedCount++;
+        else if (img.status === 'error') errorCount++;
+      });
+      
+      let description = '';
+      if (completedCount > 0) {
+        description += `Optimized ${completedCount} image${completedCount > 1 ? 's' : ''}`;
+      }
+      if (skippedCount > 0) {
+        description += description ? ', ' : '';
+        description += `${skippedCount} already optimized`;
+      }
+      if (errorCount > 0) {
+        description += description ? ', ' : '';
+        description += `${errorCount} failed`;
+      }
+      
+      toast({
+        title: "Optimization Complete",
+        description: description || "No images were processed",
+      });
+      
+      return updated;
     });
-  }, [batchImages, getCurrentOptions, toast]);
 
-  const downloadOptimized = useCallback((image: BatchImage) => {
-    if (!image.optimized) return;
-    
-    const link = document.createElement('a');
-    link.href = image.optimized.dataUrl;
-    const ext = getCurrentOptions().format === 'image/webp' ? 'webp' : 
-                getCurrentOptions().format === 'image/jpeg' ? 'jpg' : 'png';
-    link.download = image.name.replace(/\.[^.]+$/, `.${ext}`);
-    link.click();
-  }, [getCurrentOptions]);
-
-  const downloadAllOptimized = useCallback(() => {
-    batchImages
-      .filter(img => img.optimized)
-      .forEach(img => downloadOptimized(img));
-  }, [batchImages, downloadOptimized]);
+    refetchImages();
+  }, [processedImages, getCurrentOptions, repository, toast, refetchImages]);
 
   const getTotalStats = useCallback(() => {
-    const completed = batchImages.filter(img => img.optimized);
+    const completed = processedImages.filter(img => img.optimized);
     if (completed.length === 0) return null;
-    
-    const originalTotal = completed.reduce((sum, img) => sum + img.originalSize, 0);
+
+    const originalTotal = completed.reduce((sum, img) => sum + img.original.size, 0);
     const optimizedTotal = completed.reduce((sum, img) => sum + (img.optimized?.optimizedSize || 0), 0);
     const savedTotal = originalTotal - optimizedTotal;
     const avgRatio = completed.reduce((sum, img) => sum + (img.optimized?.compressionRatio || 0), 0) / completed.length;
-    
+
     return {
       originalTotal,
       optimizedTotal,
@@ -205,10 +265,13 @@ export default function PerformancePage() {
       avgRatio: Math.round(avgRatio),
       count: completed.length,
     };
-  }, [batchImages]);
+  }, [processedImages]);
 
   const stats = getTotalStats();
   const presetConfig = COMPRESSION_PRESETS[selectedPreset];
+
+  const selectedCount = processedImages.filter(img => img.selected).length;
+  const needsOptimizationCount = processedImages.filter(img => img.seoStatus.status !== 'good').length;
 
   return (
     <div className="flex-1 overflow-auto">
@@ -219,23 +282,22 @@ export default function PerformancePage() {
             Performance
           </h1>
           <p className="text-muted-foreground mt-1">
-            Optimize images and manage deployments efficiently
+            Optimize all images in your site for better SEO and faster loading
           </p>
         </div>
 
-        <Tabs defaultValue="image" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-2 lg:w-[400px]">
-            <TabsTrigger value="image" className="gap-2">
-              <Image className="w-4 h-4" />
-              Image Optimization
-            </TabsTrigger>
-            <TabsTrigger value="deploy" className="gap-2">
-              <Rocket className="w-4 h-4" />
-              Smart Deploy
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="image" className="space-y-6">
+        {!repository ? (
+          <Card className="p-8">
+            <div className="text-center">
+              <FolderOpen className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
+              <h2 className="text-lg font-medium mb-2">No Repository Connected</h2>
+              <p className="text-muted-foreground">
+                Connect a repository from the sidebar to optimize images.
+              </p>
+            </div>
+          </Card>
+        ) : (
+          <div className="space-y-6">
             <div className="grid gap-6 lg:grid-cols-2">
               <Card>
                 <CardHeader>
@@ -254,13 +316,13 @@ export default function PerformancePage() {
                         key={key}
                         onClick={() => setSelectedPreset(key)}
                         className={`p-3 rounded-md border text-left transition-all ${
-                          selectedPreset === key 
-                            ? 'border-primary bg-primary/5' 
+                          selectedPreset === key
+                            ? 'border-primary bg-primary/5'
                             : 'border-border hover-elevate'
                         }`}
                         data-testid={`preset-${key}`}
                       >
-                        <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center justify-between gap-1 mb-1">
                           <span className="font-medium text-sm">{preset.name}</span>
                           {selectedPreset === key && (
                             <Check className="w-4 h-4 text-primary" />
@@ -356,101 +418,112 @@ export default function PerformancePage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <FileImage className="w-5 h-5" />
-                    Batch Optimizer
+                    Site Images
                   </CardTitle>
                   <CardDescription>
-                    Optimize multiple images at once
+                    {imagesLoading ? 'Loading...' : `${repoImages.length} images found in repository`}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div
-                    className="border-2 border-dashed rounded-md p-6 text-center hover:border-primary/50 transition-colors cursor-pointer"
-                    onClick={() => document.getElementById('batch-file-input')?.click()}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      handleFilesSelected(e.dataTransfer.files);
-                    }}
-                    data-testid="batch-dropzone"
-                  >
-                    <Upload className="w-8 h-8 mx-auto mb-2 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">
-                      Drop images here or click to select
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Supports PNG, JPG, WebP, GIF
-                    </p>
-                    <input
-                      id="batch-file-input"
-                      type="file"
-                      accept="image/*"
-                      multiple
-                      className="hidden"
-                      onChange={(e) => handleFilesSelected(e.target.files)}
-                    />
-                  </div>
-
-                  {batchImages.length > 0 && (
+                  {!imagesScanned ? (
+                    <div className="text-center py-8">
+                      <Image className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Scan your repository to find images that need optimization
+                      </p>
+                      <Button
+                        onClick={scanImages}
+                        disabled={imagesLoading || repoImages.length === 0}
+                        data-testid="button-scan-images"
+                      >
+                        <RefreshCw className="w-4 h-4 mr-2" />
+                        Scan {repoImages.length} Images
+                      </Button>
+                    </div>
+                  ) : (
                     <>
                       <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <span className="text-sm font-medium">
-                          {batchImages.length} image{batchImages.length !== 1 ? 's' : ''} queued
-                        </span>
                         <div className="flex gap-2">
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={clearBatch}
-                            disabled={isBatchProcessing}
-                            data-testid="button-clear-batch"
+                            onClick={() => selectAll(true)}
+                            disabled={isProcessing}
+                            data-testid="button-select-all"
                           >
-                            <Trash2 className="w-4 h-4 mr-1" />
-                            Clear
+                            Select All
                           </Button>
-                          {stats && stats.count > 0 && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={downloadAllOptimized}
-                              data-testid="button-download-all"
-                            >
-                              <Download className="w-4 h-4 mr-1" />
-                              Download All
-                            </Button>
-                          )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => selectAll(false)}
+                            disabled={isProcessing}
+                            data-testid="button-deselect-all"
+                          >
+                            Deselect All
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={selectNeedOptimization}
+                            disabled={isProcessing}
+                            data-testid="button-select-needs-opt"
+                          >
+                            Select Unoptimized ({needsOptimizationCount})
+                          </Button>
                         </div>
+                        <Badge variant="secondary">
+                          {selectedCount} selected
+                        </Badge>
                       </div>
 
-                      {isBatchProcessing && (
+                      {isProcessing && (
                         <div className="space-y-2">
-                          <Progress value={batchProgress} className="h-2" />
+                          <Progress value={processProgress} className="h-2" />
                           <p className="text-xs text-muted-foreground text-center">
-                            Processing... {Math.round(batchProgress)}%
+                            Optimizing... {Math.round(processProgress)}%
                           </p>
                         </div>
                       )}
 
-                      <ScrollArea className="h-[200px]">
+                      <ScrollArea className="h-[300px]">
                         <div className="space-y-2">
-                          {batchImages.map((image) => (
+                          {processedImages.map((image) => (
                             <div
                               key={image.id}
-                              className={`flex items-center justify-between gap-3 p-2 rounded-md border ${
+                              className={`flex items-center gap-3 p-2 rounded-md border ${
                                 image.status === 'completed' ? 'border-green-500/30 bg-green-50 dark:bg-green-950/20' :
                                 image.status === 'error' ? 'border-red-500/30 bg-red-50 dark:bg-red-950/20' :
                                 image.status === 'processing' ? 'border-primary/30 bg-primary/5' :
+                                image.status === 'skipped' ? 'border-yellow-500/30 bg-yellow-50 dark:bg-yellow-950/20' :
                                 'border-border'
                               }`}
-                              data-testid={`batch-item-${image.id}`}
+                              data-testid={`image-item-${image.id}`}
                             >
+                              <Checkbox
+                                checked={image.selected}
+                                onCheckedChange={() => toggleImageSelection(image.id)}
+                                disabled={isProcessing || image.status !== 'pending'}
+                                data-testid={`checkbox-${image.id}`}
+                              />
                               <div className="flex-1 min-w-0">
-                                <p className="text-sm font-medium truncate">{image.name}</p>
+                                <p className="text-sm font-medium truncate">{image.original.name}</p>
                                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                  <span>{formatBytes(image.originalSize)}</span>
+                                  <span>{formatBytes(image.original.size)}</span>
+                                  <Tooltip>
+                                    <TooltipTrigger>
+                                      {image.seoStatus.status === 'good' ? (
+                                        <CheckCircle className="w-3 h-3 text-green-500" />
+                                      ) : image.seoStatus.status === 'warning' ? (
+                                        <AlertTriangle className="w-3 h-3 text-yellow-500" />
+                                      ) : (
+                                        <AlertCircle className="w-3 h-3 text-red-500" />
+                                      )}
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>{image.seoStatus.message}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
                                   {image.optimized && (
                                     <>
                                       <ChevronRight className="w-3 h-3" />
@@ -462,6 +535,11 @@ export default function PerformancePage() {
                                       </Badge>
                                     </>
                                   )}
+                                  {image.status === 'skipped' && (
+                                    <span className="text-yellow-600 dark:text-yellow-400">
+                                      Already optimized
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2 shrink-0">
@@ -469,30 +547,20 @@ export default function PerformancePage() {
                                   <RefreshCw className="w-4 h-4 animate-spin text-primary" />
                                 )}
                                 {image.status === 'completed' && (
-                                  <>
-                                    <Check className="w-4 h-4 text-green-600" />
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      onClick={() => downloadOptimized(image)}
-                                      data-testid={`download-${image.id}`}
-                                    >
-                                      <Download className="w-4 h-4" />
-                                    </Button>
-                                  </>
+                                  <Check className="w-4 h-4 text-green-600" />
                                 )}
                                 {image.status === 'error' && (
-                                  <AlertCircle className="w-4 h-4 text-red-500" />
+                                  <Tooltip>
+                                    <TooltipTrigger>
+                                      <AlertCircle className="w-4 h-4 text-red-500" />
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>{image.error}</p>
+                                    </TooltipContent>
+                                  </Tooltip>
                                 )}
-                                {image.status === 'pending' && !isBatchProcessing && (
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => removeFromBatch(image.id)}
-                                    data-testid={`remove-${image.id}`}
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </Button>
+                                {image.status === 'skipped' && (
+                                  <Check className="w-4 h-4 text-yellow-600" />
                                 )}
                               </div>
                             </div>
@@ -507,7 +575,7 @@ export default function PerformancePage() {
                             Space Saved
                           </AlertTitle>
                           <AlertDescription className="text-green-600 dark:text-green-500 text-sm">
-                            {stats.count} images: {formatBytes(stats.originalTotal)} → {formatBytes(stats.optimizedTotal)} 
+                            {stats.count} images: {formatBytes(stats.originalTotal)} to {formatBytes(stats.optimizedTotal)}
                             <span className="font-semibold ml-2">
                               (Saved {formatBytes(stats.savedTotal)}, avg {stats.avgRatio}% reduction)
                             </span>
@@ -517,19 +585,19 @@ export default function PerformancePage() {
 
                       <Button
                         className="w-full"
-                        onClick={processBatch}
-                        disabled={isBatchProcessing || batchImages.filter(i => i.status === 'pending').length === 0}
-                        data-testid="button-process-batch"
+                        onClick={optimizeAllSelected}
+                        disabled={isProcessing || selectedCount === 0}
+                        data-testid="button-optimize-all"
                       >
-                        {isBatchProcessing ? (
+                        {isProcessing ? (
                           <>
                             <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                            Processing...
+                            Optimizing...
                           </>
                         ) : (
                           <>
                             <Play className="w-4 h-4 mr-2" />
-                            Optimize {batchImages.filter(i => i.status === 'pending').length} Images
+                            Optimize {selectedCount} Images
                           </>
                         )}
                       </Button>
@@ -546,189 +614,13 @@ export default function PerformancePage() {
                 <ul className="list-disc list-inside mt-2 space-y-1 text-sm">
                   <li>Use <strong>WebP format</strong> for best compression (30-50% smaller than JPEG)</li>
                   <li>Hero images work best at <strong>1200x800px</strong> for most blog layouts</li>
-                  <li>Use <strong>Aggressive</strong> preset for thumbnails and small images</li>
-                  <li>AI-generated images are automatically optimized when saving</li>
+                  <li>Images under <strong>200KB</strong> are optimal for SEO and fast loading</li>
+                  <li>Optimized images are saved as new files - originals are preserved</li>
                 </ul>
               </AlertDescription>
             </Alert>
-          </TabsContent>
-
-          <TabsContent value="deploy" className="space-y-6">
-            <div className="grid gap-6 lg:grid-cols-2">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Settings className="w-5 h-5" />
-                    Deployment Settings
-                  </CardTitle>
-                  <CardDescription>
-                    Control how and when deployments happen
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="flex items-center justify-between p-4 rounded-md border bg-muted/30">
-                    <div className="space-y-0.5">
-                      <label className="text-sm font-medium flex items-center gap-2">
-                        <GitCommit className="w-4 h-4" />
-                        Batch Changes
-                      </label>
-                      <p className="text-xs text-muted-foreground">
-                        Collect multiple changes before deploying
-                      </p>
-                    </div>
-                    <Switch
-                      checked={deployBatching}
-                      onCheckedChange={setDeployBatching}
-                      data-testid="switch-batch-deploy"
-                    />
-                  </div>
-
-                  <Alert>
-                    <Info className="w-4 h-4" />
-                    <AlertTitle>Smart Deploy</AlertTitle>
-                    <AlertDescription className="text-sm mt-2">
-                      <p>When enabled, changes are collected and you can review them before deploying. This helps:</p>
-                      <ul className="list-disc list-inside mt-2 space-y-1">
-                        <li>Reduce Vercel build minutes usage</li>
-                        <li>Bundle multiple posts into one deployment</li>
-                        <li>Preview all changes before going live</li>
-                      </ul>
-                    </AlertDescription>
-                  </Alert>
-
-                  <div className="space-y-3">
-                    <h4 className="text-sm font-medium">Deployment Tips</h4>
-                    <div className="space-y-2 text-sm text-muted-foreground">
-                      <div className="flex items-start gap-2">
-                        <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                        <span>Create multiple posts with Bulk AI Generator before deploying</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                        <span>Edit all theme/branding settings at once, then deploy</span>
-                      </div>
-                      <div className="flex items-start gap-2">
-                        <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                        <span>Use scheduled deploys for content calendars</span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Clock className="w-5 h-5" />
-                    Deployment Strategy
-                  </CardTitle>
-                  <CardDescription>
-                    Best practices for efficient deployments
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-3">
-                    <div className="p-4 rounded-md border bg-muted/30">
-                      <h4 className="font-medium flex items-center gap-2 mb-2">
-                        <Badge variant="secondary">1</Badge>
-                        Bulk Create Content
-                      </h4>
-                      <p className="text-sm text-muted-foreground">
-                        Use the Bulk AI Generator to create 5-10 posts at once. 
-                        All posts are saved to GitHub but not deployed yet.
-                      </p>
-                    </div>
-
-                    <div className="p-4 rounded-md border bg-muted/30">
-                      <h4 className="font-medium flex items-center gap-2 mb-2">
-                        <Badge variant="secondary">2</Badge>
-                        Review & Organize
-                      </h4>
-                      <p className="text-sm text-muted-foreground">
-                        Edit titles, adjust categories, and finalize content. 
-                        Changes are committed to GitHub incrementally.
-                      </p>
-                    </div>
-
-                    <div className="p-4 rounded-md border bg-muted/30">
-                      <h4 className="font-medium flex items-center gap-2 mb-2">
-                        <Badge variant="secondary">3</Badge>
-                        Single Deploy
-                      </h4>
-                      <p className="text-sm text-muted-foreground">
-                        When ready, trigger one deployment from the Vercel page. 
-                        All your changes go live together.
-                      </p>
-                    </div>
-                  </div>
-
-                  <Alert className="border-primary/50 bg-primary/5">
-                    <Rocket className="w-4 h-4 text-primary" />
-                    <AlertTitle className="text-primary">Pro Tip</AlertTitle>
-                    <AlertDescription className="text-sm">
-                      Vercel auto-deploys on every GitHub push. To batch changes:
-                      <ol className="list-decimal list-inside mt-2 space-y-1">
-                        <li>Disable auto-deploy in Vercel project settings</li>
-                        <li>Create all your content in EG Press</li>
-                        <li>Manually trigger deploy when ready</li>
-                      </ol>
-                    </AlertDescription>
-                  </Alert>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Rocket className="w-5 h-5" />
-                  Vercel Auto-Deploy Control
-                </CardTitle>
-                <CardDescription>
-                  How to control automatic deployments in Vercel
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="p-4 rounded-md border">
-                    <h4 className="font-medium mb-2">Disable Auto-Deploy</h4>
-                    <ol className="text-sm text-muted-foreground space-y-2">
-                      <li className="flex gap-2">
-                        <span className="text-primary font-medium">1.</span>
-                        Go to Vercel Dashboard → Your Project
-                      </li>
-                      <li className="flex gap-2">
-                        <span className="text-primary font-medium">2.</span>
-                        Settings → Git → Build & Development
-                      </li>
-                      <li className="flex gap-2">
-                        <span className="text-primary font-medium">3.</span>
-                        Turn off "Automatically deploy on push"
-                      </li>
-                      <li className="flex gap-2">
-                        <span className="text-primary font-medium">4.</span>
-                        Use "Trigger Deploy" button in EG Press Vercel page
-                      </li>
-                    </ol>
-                  </div>
-
-                  <div className="p-4 rounded-md border">
-                    <h4 className="font-medium mb-2">Ignored Build Step</h4>
-                    <p className="text-sm text-muted-foreground mb-3">
-                      Add this to Vercel settings to skip deploys for drafts:
-                    </p>
-                    <code className="block p-2 rounded bg-muted text-xs font-mono">
-                      git diff HEAD^ HEAD --quiet -- src/content/blog/
-                    </code>
-                    <p className="text-xs text-muted-foreground mt-2">
-                      This skips deploy if only draft posts changed.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+          </div>
+        )}
       </div>
     </div>
   );
