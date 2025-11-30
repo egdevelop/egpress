@@ -76,6 +76,9 @@ The system comprises a React-based frontend and an Express.js backend.
 - Added multi-language support: 76 world languages with searchable dropdown using Popover + Command components
 - Implemented AI image generation using gemini-2.0-flash-exp-image-generation: separate from blog post with download capability via /api/ai/generate-image endpoint
 - Image prompt auto-fills with suggested hero image description from generated post
+- Seamless AI post workflow: generated images automatically uploaded to GitHub and set as hero image when saving draft
+- Auto-populate author from GitHub username when saving AI-generated posts
+- Added /api/upload-image-base64 endpoint for AI-generated image uploads
 
 ## External Dependencies
 
