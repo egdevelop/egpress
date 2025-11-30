@@ -30,7 +30,7 @@ The system comprises a React-based frontend and an Express.js backend.
 - **Content Management:** CRUD operations for blog posts with frontmatter support, tag management, and image upload for hero images.
 - **Site Settings (egpress-v1):** Comprehensive configuration matching siteSettings.ts structure:
   - General: siteName, siteTagline, siteDescription, siteUrl
-  - Logo: text, showIcon, iconText
+  - Logo: type (text/image), text, image (file upload), favicon (file upload), showText, width, height
   - SEO: 18 fields including defaultTitle, titleTemplate, defaultDescription, defaultImage (file upload), keywords, language, locale, themeColor, robots, twitterHandle, twitterCardType, verification IDs, analytics, author/publisher info
   - Social: 6 platforms (twitter, linkedin, facebook, instagram, github, youtube)
   - Contact: email, phone, address
@@ -63,9 +63,11 @@ The system comprises a React-based frontend and an Express.js backend.
 ## Recent Changes (November 2024)
 
 - Updated Site Settings to match new siteSettings.ts structure from template-egpress-v1
+- Updated Logo settings with new structure: type (text/image), image upload, favicon upload, showText, width, height
 - Added Content Defaults page for navigation, homepage, blog, and categories configuration
 - Enhanced Theme page with full designTokens support (typography, spacing, borderRadius, shadows)
 - Created ImageUpload component for file uploads to GitHub /public/image directory
+- Fixed image preview to use GitHub raw URLs instead of non-existent local paths
 - Converted all image inputs (OG image, hero image, etc.) to file upload instead of URL input
 - Images are stored in /public/image and accessible at /image/filename after build
 

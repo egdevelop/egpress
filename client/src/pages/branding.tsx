@@ -62,9 +62,13 @@ const newBrandingFormSchema = z.object({
   siteDescription: z.string(),
   siteUrl: z.string().url("Must be a valid URL").or(z.string().length(0)),
   logo: z.object({
+    type: z.enum(['text', 'image']),
     text: z.string(),
-    showIcon: z.boolean(),
-    iconText: z.string(),
+    image: z.string(),
+    favicon: z.string(),
+    showText: z.boolean(),
+    width: z.number().min(16).max(200),
+    height: z.number().min(16).max(200),
   }),
   seo: z.object({
     defaultTitle: z.string(),
@@ -180,7 +184,7 @@ export default function Branding() {
       siteTagline: "",
       siteDescription: "",
       siteUrl: "",
-      logo: { text: "", showIcon: false, iconText: "" },
+      logo: { type: "text" as const, text: "", image: "", favicon: "", showText: true, width: 32, height: 32 },
       seo: { 
         defaultTitle: "", 
         titleTemplate: "%s | Site Name",
@@ -241,9 +245,13 @@ export default function Branding() {
         siteDescription: s.siteDescription || "",
         siteUrl: s.siteUrl || "",
         logo: { 
+          type: (s.logo?.type as 'text' | 'image') || "text",
           text: s.logo?.text || "", 
-          showIcon: s.logo?.showIcon ?? false,
-          iconText: s.logo?.iconText || "",
+          image: s.logo?.image || "",
+          favicon: s.logo?.favicon || "",
+          showText: s.logo?.showText ?? true,
+          width: s.logo?.width ?? 32,
+          height: s.logo?.height ?? 32,
         },
         seo: {
           defaultTitle: s.seo?.defaultTitle || "",
@@ -556,6 +564,30 @@ export default function Branding() {
                   <CardContent className="space-y-4">
                     <FormField
                       control={newForm.control}
+                      name="logo.type"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Logo Type</FormLabel>
+                          <Select onValueChange={field.onChange} value={field.value}>
+                            <FormControl>
+                              <SelectTrigger data-testid="select-logo-type">
+                                <SelectValue placeholder="Select logo type" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="text">Text Only</SelectItem>
+                              <SelectItem value="image">Image</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <FormDescription>
+                            Choose between text-based or image logo
+                          </FormDescription>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
                       name="logo.text"
                       render={({ field }) => (
                         <FormItem>
@@ -576,20 +608,16 @@ export default function Branding() {
 
                     <FormField
                       control={newForm.control}
-                      name="logo.showIcon"
+                      name="logo.image"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
-                          <div className="space-y-0.5">
-                            <FormLabel className="text-base">Show Icon</FormLabel>
-                            <FormDescription>
-                              Display an icon next to the logo text
-                            </FormDescription>
-                          </div>
+                        <FormItem>
+                          <FormLabel>Logo Image</FormLabel>
                           <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                              data-testid="switch-logo-show-icon"
+                            <ImageUpload
+                              value={field.value}
+                              onChange={field.onChange}
+                              description="Upload your logo image (stored in /public/image)"
+                              data-testid="upload-logo-image"
                             />
                           </FormControl>
                         </FormItem>
@@ -598,24 +626,91 @@ export default function Branding() {
 
                     <FormField
                       control={newForm.control}
-                      name="logo.iconText"
+                      name="logo.favicon"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Icon Text</FormLabel>
+                          <FormLabel>Favicon</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="MB"
-                              maxLength={2}
-                              {...field}
-                              data-testid="input-logo-icon-text"
+                            <ImageUpload
+                              value={field.value}
+                              onChange={field.onChange}
+                              description="Upload your favicon (stored in /public/image)"
+                              data-testid="upload-favicon"
                             />
                           </FormControl>
-                          <FormDescription>
-                            1-2 characters displayed as logo icon (when icon is enabled)
-                          </FormDescription>
                         </FormItem>
                       )}
                     />
+
+                    <FormField
+                      control={newForm.control}
+                      name="logo.showText"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">Show Text with Logo</FormLabel>
+                            <FormDescription>
+                              Display text next to the logo image
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              data-testid="switch-logo-show-text"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <FormField
+                        control={newForm.control}
+                        name="logo.width"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Logo Width (px)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min={16}
+                                max={200}
+                                {...field}
+                                onChange={(e) => field.onChange(parseInt(e.target.value) || 32)}
+                                data-testid="input-logo-width"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Width of the logo in pixels (16-200)
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="logo.height"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Logo Height (px)</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min={16}
+                                max={200}
+                                {...field}
+                                onChange={(e) => field.onChange(parseInt(e.target.value) || 32)}
+                                data-testid="input-logo-height"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Height of the logo in pixels (16-200)
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
