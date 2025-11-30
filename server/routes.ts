@@ -6,22 +6,21 @@ import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConn
 import { VercelService } from "./vercel";
 import { generateBlogPost } from "./gemini";
 import { 
-  saveUserSettings, 
-  loadUserSettings, 
-  updateGeminiKey, 
-  updateVercelConfig, 
-  updateSearchConsoleConfig, 
-  updateAdsenseConfig, 
-  clearVercelConfig, 
-  clearSearchConsoleConfig,
-  // Repository-based settings
+  // User-level settings (credentials shared across all repos)
+  getUserSettings,
+  saveUserSettings,
+  updateUserGeminiKey,
+  updateUserVercelToken,
+  updateUserSearchConsoleCredentials,
+  clearUserSearchConsoleCredentials,
+  clearUserVercelToken,
+  // Repository-level settings (per-repo linking)
   getRepositorySettings,
   saveRepositorySettings,
   updateRepositoryVercel,
   clearRepositoryVercel,
-  updateRepositorySearchConsole,
-  clearRepositorySearchConsole,
-  updateRepositoryGemini,
+  updateRepositorySiteUrl,
+  clearRepositorySiteUrl,
   updateRepositoryAdsense,
 } from "./supabase";
 import matter from "gray-matter";
@@ -325,31 +324,37 @@ export async function registerRoutes(
         // Set as manual token for GitHub operations
         setManualGitHubToken(token);
         
-        // Load saved settings from Supabase (using username for OAuth compatibility)
-        const savedSettings = await loadUserSettings(token, user.login);
+        // Load user-level settings from Supabase
+        const userSettings = await getUserSettings(user.login);
         
         // If there are saved settings, restore them to storage
-        if (savedSettings) {
-          if (savedSettings.gemini_api_key) {
-            await storage.setGeminiApiKey(savedSettings.gemini_api_key);
+        if (userSettings) {
+          if (userSettings.gemini_api_key) {
+            await storage.setGeminiApiKey(userSettings.gemini_api_key);
           }
-          if (savedSettings.vercel_token) {
+          if (userSettings.vercel_token) {
             await storage.setVercelConfig({
-              token: savedSettings.vercel_token,
-              teamId: savedSettings.vercel_team_id,
+              token: userSettings.vercel_token,
               username: user.login,
             });
           }
-          if (savedSettings.search_console_client_email && savedSettings.search_console_private_key) {
-            await storage.setSearchConsoleConfig({
-              clientEmail: savedSettings.search_console_client_email,
-              privateKey: savedSettings.search_console_private_key,
-              siteUrl: savedSettings.search_console_site_url || "",
-            });
+          // Load Search Console service account (user-level)
+          if (userSettings.search_console_service_account) {
+            try {
+              const parsed = JSON.parse(userSettings.search_console_service_account);
+              await storage.setSearchConsoleConfig({
+                serviceAccountJson: userSettings.search_console_service_account,
+                clientEmail: parsed.client_email,
+                privateKey: parsed.private_key,
+                siteUrl: "", // Site URL is per-repo, loaded when connecting to repo
+              });
+            } catch (e) {
+              console.warn("Failed to parse Search Console credentials");
+            }
           }
         } else {
-          // Create initial settings record
-          await saveUserSettings(token, user.login, {});
+          // Create initial user settings record
+          await saveUserSettings(user.login, token, {});
         }
         
         res.json({ 
@@ -479,29 +484,35 @@ export async function registerRoutes(
       // Set as manual token for GitHub operations
       setManualGitHubToken(accessToken);
       
-      // Load user settings from Supabase if available (using username for OAuth compatibility)
-      const savedSettings = await loadUserSettings(accessToken, user.login);
-      if (savedSettings) {
-        if (savedSettings.gemini_api_key) {
-          await storage.setGeminiApiKey(savedSettings.gemini_api_key);
+      // Load user-level settings from Supabase
+      const userSettings = await getUserSettings(user.login);
+      if (userSettings) {
+        if (userSettings.gemini_api_key) {
+          await storage.setGeminiApiKey(userSettings.gemini_api_key);
         }
-        if (savedSettings.vercel_token) {
+        if (userSettings.vercel_token) {
           await storage.setVercelConfig({
-            token: savedSettings.vercel_token,
-            teamId: savedSettings.vercel_team_id,
+            token: userSettings.vercel_token,
             username: user.login,
           });
         }
-        if (savedSettings.search_console_client_email && savedSettings.search_console_private_key) {
-          await storage.setSearchConsoleConfig({
-            clientEmail: savedSettings.search_console_client_email,
-            privateKey: savedSettings.search_console_private_key,
-            siteUrl: savedSettings.search_console_site_url || "",
-          });
+        // Load Search Console service account (user-level)
+        if (userSettings.search_console_service_account) {
+          try {
+            const parsed = JSON.parse(userSettings.search_console_service_account);
+            await storage.setSearchConsoleConfig({
+              serviceAccountJson: userSettings.search_console_service_account,
+              clientEmail: parsed.client_email,
+              privateKey: parsed.private_key,
+              siteUrl: "", // Site URL is per-repo, loaded when connecting to repo
+            });
+          } catch (e) {
+            console.warn("Failed to parse Search Console credentials");
+          }
         }
       } else {
-        // Create initial settings record
-        await saveUserSettings(accessToken, user.login, {});
+        // Create initial user settings record
+        await saveUserSettings(user.login, accessToken, {});
       }
       
       // Redirect to dashboard
@@ -658,43 +669,27 @@ export async function registerRoutes(
       await fetchBranches(parsed.owner, parsed.repo);
       await syncRepositoryData(parsed.owner, parsed.repo, repoData.default_branch);
 
-      // Load repository-specific settings from Supabase
+      // Load repository-specific settings from Supabase (per-repo linking data)
       const repoSettings = await getRepositorySettings(repoData.full_name);
       if (repoSettings) {
-        // Load Gemini API key
-        if (repoSettings.gemini_api_key) {
-          await storage.setGeminiApiKey(repoSettings.gemini_api_key);
-        }
-        // Load Vercel config
-        if (repoSettings.vercel_token) {
-          await storage.setVercelConfig({
-            token: repoSettings.vercel_token,
-            teamId: repoSettings.vercel_team_id,
-            username: req.session.githubUsername || "",
+        // Load Vercel project linking (which project is linked to this repo)
+        if (repoSettings.vercel_project_id) {
+          await storage.setVercelProject({
+            id: repoSettings.vercel_project_id,
+            name: repoSettings.vercel_project_name || "",
+            framework: "astro",
           });
-          if (repoSettings.vercel_project_id) {
-            await storage.setVercelProject({
-              id: repoSettings.vercel_project_id,
-              name: repoSettings.vercel_project_name || "",
-              framework: "astro",
-            });
-          }
         }
-        // Load Search Console config (full JSON)
-        if (repoSettings.search_console_service_account) {
-          try {
-            const parsed = JSON.parse(repoSettings.search_console_service_account);
-            await storage.setSearchConsoleConfig({
-              serviceAccountJson: repoSettings.search_console_service_account,
-              clientEmail: parsed.client_email,
-              privateKey: parsed.private_key,
-              siteUrl: repoSettings.search_console_site_url || "",
-            });
-          } catch (e) {
-            console.warn("Failed to parse saved Search Console config");
-          }
+        // Load Search Console site URL (which site is linked to this repo)
+        // The service account credentials come from user_settings (already loaded on login)
+        const existingConfig = await storage.getSearchConsoleConfig();
+        if (existingConfig && repoSettings.search_console_site_url) {
+          await storage.setSearchConsoleConfig({
+            ...existingConfig,
+            siteUrl: repoSettings.search_console_site_url,
+          });
         }
-        // Load AdSense config
+        // Load AdSense config (per-repo)
         if (repoSettings.adsense_publisher_id) {
           await storage.setAdsenseConfig({
             enabled: true,
@@ -703,11 +698,10 @@ export async function registerRoutes(
             slots: repoSettings.adsense_slots || {},
           });
         }
-      } else if (req.session.githubToken && req.session.githubUsername) {
+      } else if (req.session.githubUsername) {
         // Create initial repository settings record
         await saveRepositorySettings(
           repoData.full_name,
-          req.session.githubToken,
           req.session.githubUsername,
           {}
         );
@@ -724,14 +718,16 @@ export async function registerRoutes(
           // Save the linked project
           await storage.setVercelProject(linkResult.project);
           
-          // Persist to Supabase
-          await updateRepositoryVercel(
-            repoData.full_name,
-            vercelConfig.token,
-            vercelConfig.teamId,
-            linkResult.project.id,
-            linkResult.project.name
-          );
+          // Persist project linking to repository_settings
+          if (req.session.githubUsername) {
+            await updateRepositoryVercel(
+              repoData.full_name,
+              req.session.githubUsername,
+              linkResult.project.id,
+              vercelConfig.teamId,
+              linkResult.project.name
+            );
+          }
           
           vercelAutoLink = {
             project: linkResult.project,
@@ -2809,9 +2805,9 @@ export async function registerRoutes(
       if (save) {
         await storage.setGeminiApiKey(apiKey);
         
-        // Persist to Supabase if user is authenticated (using username for OAuth compatibility)
-        if (req.session.githubToken) {
-          await updateGeminiKey(req.session.githubToken, apiKey, req.session.githubUsername);
+        // Persist to user_settings if user is authenticated
+        if (req.session.githubUsername) {
+          await updateUserGeminiKey(req.session.githubUsername, apiKey);
         }
       }
       
@@ -2831,7 +2827,7 @@ export async function registerRoutes(
     }
   });
 
-  // Save Gemini API key (protected)
+  // Save Gemini API key (protected) - saved to user_settings
   app.post("/api/ai/key", requireAuth, async (req, res) => {
     try {
       const { apiKey } = req.body;
@@ -2842,10 +2838,12 @@ export async function registerRoutes(
       
       await storage.setGeminiApiKey(apiKey);
       
-      // Persist to Supabase (using username for OAuth compatibility)
-      const supabaseResult = await updateGeminiKey(req.session.githubToken!, apiKey, req.session.githubUsername);
-      if (!supabaseResult) {
-        console.warn("Failed to persist Gemini key to Supabase");
+      // Persist to user_settings (user-level credential)
+      if (req.session.githubUsername) {
+        const supabaseResult = await updateUserGeminiKey(req.session.githubUsername, apiKey);
+        if (!supabaseResult) {
+          console.warn("Failed to persist Gemini key to Supabase");
+        }
       }
       
       res.json({ success: true });
@@ -2859,10 +2857,12 @@ export async function registerRoutes(
     try {
       await storage.setGeminiApiKey(null);
       
-      // Clear from Supabase (using username for OAuth compatibility)
-      const supabaseResult = await updateGeminiKey(req.session.githubToken!, "", req.session.githubUsername);
-      if (!supabaseResult) {
-        console.warn("Failed to clear Gemini key from Supabase");
+      // Clear from user_settings
+      if (req.session.githubUsername) {
+        const supabaseResult = await updateUserGeminiKey(req.session.githubUsername, "");
+        if (!supabaseResult) {
+          console.warn("Failed to clear Gemini key from Supabase");
+        }
       }
       
       res.json({ success: true });
@@ -2889,7 +2889,7 @@ export async function registerRoutes(
     }
   });
 
-  // Save Search Console credentials (protected)
+  // Save Search Console credentials (protected) - saved to user_settings with encryption
   app.post("/api/search-console/credentials", requireAuth, async (req, res) => {
     try {
       const { serviceAccountJson } = req.body;
@@ -2909,35 +2909,22 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Invalid JSON format" });
       }
 
+      // Store in memory
       await storage.setSearchConsoleConfig({
-        siteUrl: "",
+        siteUrl: "", // Site URL is per-repo, selected separately
         serviceAccountJson,
         clientEmail: parsed.client_email,
         privateKey: parsed.private_key,
       });
 
-      // Persist to Supabase (repository-based, encrypted)
-      const repo = await storage.getRepository();
-      if (repo) {
-        const supabaseResult = await updateRepositorySearchConsole(
-          repo.fullName,
-          serviceAccountJson,
-          ""
+      // Persist to user_settings (user-level credential, encrypted)
+      if (req.session.githubUsername) {
+        const supabaseResult = await updateUserSearchConsoleCredentials(
+          req.session.githubUsername,
+          serviceAccountJson
         );
         if (!supabaseResult) {
-          console.warn("Failed to persist Search Console config to Supabase");
-        }
-      } else {
-        // Fallback to legacy user-based storage (using username for OAuth compatibility)
-        const supabaseResult = await updateSearchConsoleConfig(
-          req.session.githubToken!,
-          parsed.client_email,
-          parsed.private_key,
-          "",
-          req.session.githubUsername
-        );
-        if (!supabaseResult) {
-          console.warn("Failed to persist Search Console config to Supabase (legacy)");
+          console.warn("Failed to persist Search Console credentials to Supabase");
         }
       }
 
@@ -2954,19 +2941,18 @@ export async function registerRoutes(
       await storage.setSearchConsoleConfig(null);
       await storage.setIndexingStatus([]);
       
-      // Clear from Supabase
+      // Clear from user_settings
+      if (req.session.githubUsername) {
+        const supabaseResult = await clearUserSearchConsoleCredentials(req.session.githubUsername);
+        if (!supabaseResult) {
+          console.warn("Failed to clear Search Console credentials from Supabase");
+        }
+      }
+      
+      // Also clear the site URL from repository_settings for the current repo
       const repo = await storage.getRepository();
       if (repo) {
-        const supabaseResult = await clearRepositorySearchConsole(repo.fullName);
-        if (!supabaseResult) {
-          console.warn("Failed to clear Search Console config from Supabase");
-        }
-      } else {
-        // Fallback to legacy (using username for OAuth compatibility)
-        const supabaseResult = await clearSearchConsoleConfig(req.session.githubToken!, req.session.githubUsername);
-        if (!supabaseResult) {
-          console.warn("Failed to clear Search Console config from Supabase (legacy)");
-        }
+        await clearRepositorySiteUrl(repo.fullName);
       }
       
       res.json({ success: true });
@@ -3300,10 +3286,12 @@ export async function registerRoutes(
           username: user.username,
         });
         
-        // Persist to Supabase (using username for OAuth compatibility)
-        const supabaseResult = await updateVercelConfig(req.session.githubToken!, token, teamId, undefined, req.session.githubUsername);
-        if (!supabaseResult) {
-          console.warn("Failed to persist Vercel config to Supabase");
+        // Persist to user_settings (user-level credential)
+        if (req.session.githubUsername) {
+          const supabaseResult = await updateUserVercelToken(req.session.githubUsername, token);
+          if (!supabaseResult) {
+            console.warn("Failed to persist Vercel token to Supabase");
+          }
         }
         
         res.json({
@@ -3326,10 +3314,18 @@ export async function registerRoutes(
       await storage.setVercelDeployments([]);
       await storage.setVercelDomains([]);
       
-      // Clear from Supabase (using username for OAuth compatibility)
-      const supabaseResult = await clearVercelConfig(req.session.githubToken!, req.session.githubUsername);
-      if (!supabaseResult) {
-        console.warn("Failed to clear Vercel config from Supabase");
+      // Clear from user_settings
+      if (req.session.githubUsername) {
+        const supabaseResult = await clearUserVercelToken(req.session.githubUsername);
+        if (!supabaseResult) {
+          console.warn("Failed to clear Vercel token from Supabase");
+        }
+      }
+      
+      // Also clear the project linking from repository_settings for the current repo
+      const repo = await storage.getRepository();
+      if (repo) {
+        await clearRepositoryVercel(repo.fullName);
       }
       
       res.json({ success: true });
@@ -3657,15 +3653,16 @@ export async function registerRoutes(
       // Save project to storage
       await storage.setVercelProject(result.project);
       
-      // Save to Supabase with repository identifier
-      const repoFullName = `${repo.owner}/${repo.name}`;
-      await updateRepositoryVercel(
-        repoFullName,
-        config.token,
-        config.teamId,
-        result.project.id,
-        result.project.name
-      );
+      // Save project linking to repository_settings
+      if (req.session.githubUsername) {
+        await updateRepositoryVercel(
+          repo.fullName,
+          req.session.githubUsername,
+          result.project.id,
+          config.teamId,
+          result.project.name
+        );
+      }
       
       // Fetch deployments and domains
       const deployments = await vercel.getDeployments(result.project.id);
@@ -3755,11 +3752,10 @@ export async function registerRoutes(
         siteUrl,
       });
 
-      // Update Supabase with repository identifier
+      // Save site URL to repository_settings (per-repo linking)
       const repo = await storage.getRepository();
-      if (repo) {
-        const repoFullName = `${repo.owner}/${repo.name}`;
-        await updateRepositorySearchConsole(repoFullName, config.serviceAccountJson, siteUrl);
+      if (repo && req.session.githubUsername) {
+        await updateRepositorySiteUrl(repo.fullName, req.session.githubUsername, siteUrl);
       }
 
       res.json({ success: true });

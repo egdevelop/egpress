@@ -1,328 +1,54 @@
 # EG Press
 
-A web-based Content Management System for managing blog templates with GitHub integration.
-
 ## Overview
 
-This CMS provides a visual interface for managing blog content directly from GitHub repositories. It features:
-
-- **CRUD Operations**: Create, read, update, and delete blog posts
-- **GitHub Integration**: Connect to any GitHub repository and sync changes
-- **Theme Customization**: Customize blog colors with live preview (auto HSL conversion)
-- **Branding Editor**: Configure site name, logo, favicon, social links, and author info
-- **AdSense Manager**: Configure Google AdSense with multiple ad slot placements
-- **Static Pages Editor**: Edit non-blog pages like About, Contact, Privacy
-- **AI Post Generator**: Generate blog posts using Google Gemini AI
-- **Google Search Console**: Service account integration with encrypted storage, site selection, submit URLs for indexing
-- **Vercel Integration**: Automatic project linking from GitHub repo, deploy to Vercel, manage domains
-- **Sitemap Generation**: Automatic sitemap.xml generation for SEO
-- **Site Cloner**: Clone repositories to create new blog sites
-- **File Browser**: Navigate and edit repository files
-- **Markdown Editor**: Monaco-based editor with syntax highlighting and preview
-- **Split-panel Layout**: Side-by-side editing and preview experience
-- **Onboarding Wizard**: Step-by-step guided setup for new users
-- **Setup Progress**: Dashboard checklist tracking integration status
-
-## Project Structure
-
-```
-├── client/                 # Frontend React application
-│   ├── src/
-│   │   ├── components/     # Reusable UI components
-│   │   │   ├── ui/         # Shadcn UI components
-│   │   │   ├── app-sidebar.tsx
-│   │   │   └── theme-toggle.tsx
-│   │   ├── hooks/          # Custom React hooks
-│   │   ├── lib/            # Utility functions and context
-│   │   │   ├── queryClient.ts
-│   │   │   ├── theme-context.tsx
-│   │   │   └── utils.ts
-│   │   ├── pages/          # Page components
-│   │   │   ├── dashboard.tsx      # Overview & stats
-│   │   │   ├── posts.tsx          # Blog posts list
-│   │   │   ├── post-editor.tsx    # Markdown post editor
-│   │   │   ├── file-browser.tsx   # Repository file tree
-│   │   │   ├── theme-customizer.tsx # Color customization
-│   │   │   ├── branding.tsx       # Site config editor
-│   │   │   ├── adsense.tsx        # AdSense configuration
-│   │   │   ├── pages-editor.tsx   # Static pages editor
-│   │   │   ├── ai-generator.tsx   # AI post generation
-│   │   │   ├── search-console.tsx # Google Search Console integration
-│   │   │   ├── vercel.tsx         # Vercel deployment integration
-│   │   │   ├── clone-site.tsx     # Clone to new repo
-│   │   │   └── settings.tsx       # App settings
-│   │   ├── App.tsx         # Main app with routing
-│   │   └── index.css       # Global styles
-├── server/                 # Backend Express server
-│   ├── github.ts           # GitHub API integration
-│   ├── gemini.ts           # Google Gemini AI integration
-│   ├── vercel.ts           # Vercel API integration
-│   ├── routes.ts           # API endpoints
-│   ├── storage.ts          # In-memory data storage
-│   └── index.ts            # Server entry point
-├── shared/                 # Shared types and schemas
-│   └── schema.ts           # Zod schemas and TypeScript types
-└── design_guidelines.md    # UI/UX design specifications
-```
-
-## Tech Stack
-
-- **Frontend**: React, Tailwind CSS, Shadcn UI, Wouter (routing)
-- **Editor**: Monaco Editor, React Markdown
-- **Backend**: Express.js, Octokit (GitHub API)
-- **State Management**: TanStack Query
-- **Validation**: Zod
-
-## Key Features
-
-### GitHub Integration
-- Connect to any GitHub repository using `owner/repo` format
-- Automatic syncing of repository content
-- Commit changes directly to the repository
-- View file tree with GitHub-style navigation
-
-### Post Management
-- List all blog posts with filtering and sorting
-- Create new posts with frontmatter support
-- Edit posts with live markdown preview
-- Delete posts (commits deletion to repository)
-- Tag management for categorization
-
-### Theme Customization
-- Six customizable color options (primary, secondary, background, text, accent, success)
-- Live preview of color changes
-- Save theme to repository as JSON config
-
-### File Browser
-- Navigate repository file structure
-- Edit any file directly
-- Commit changes with custom messages
-- Syntax highlighting for multiple languages
-
-## API Endpoints
-
-### Repository
-- `GET /api/repository` - Get connected repository
-- `POST /api/repository/connect` - Connect to a repository
-- `POST /api/repository/disconnect` - Disconnect from repository
-- `POST /api/repository/sync` - Sync repository data
-
-### Posts
-- `GET /api/posts` - Get all posts
-- `GET /api/posts/:slug` - Get single post
-- `POST /api/posts` - Create new post
-- `PUT /api/posts/:slug` - Update post
-- `DELETE /api/posts/:slug` - Delete post
-
-### Files
-- `GET /api/files` - Get file tree
-- `GET /api/files/content?path=` - Get file content
-- `PUT /api/files/content` - Update file content
-
-### Theme
-- `GET /api/theme` - Get theme settings
-- `PUT /api/theme` - Update theme settings
-
-### Site Config (Branding)
-- `GET /api/site-config` - Get site configuration
-- `PUT /api/site-config` - Update site configuration
-
-### AdSense
-- `GET /api/adsense` - Get AdSense configuration
-- `PUT /api/adsense` - Update AdSense configuration
-
-### Static Pages
-- `GET /api/pages` - Get list of static pages
-
-### AI Generation
-- `POST /api/ai/generate` - Generate blog post with Gemini AI
-- `POST /api/ai/validate-key` - Validate Gemini API key
-- `GET /api/ai/key` - Get saved Gemini API key
-- `POST /api/ai/key` - Save Gemini API key
-- `DELETE /api/ai/key` - Clear Gemini API key
-
-### Authentication
-- `GET /api/auth/status` - Check authentication status
-- `POST /api/auth/login` - Login with GitHub token
-- `POST /api/auth/logout` - Logout and clear session
-
-### Clone Repository
-- `POST /api/clone-repo` - Clone source repo to new repository
-
-### GitHub Repositories
-- `GET /api/github/repos` - List user's GitHub repositories (paginated)
-
-### GitHub
-- `GET /api/github/status` - Check GitHub connection and source
-- `GET /api/github/user` - Get authenticated user
-- `POST /api/github/token` - Set manual GitHub Personal Access Token
-- `POST /api/github/token/clear` - Clear manual token
-
-### Branding (Direct Component Editing)
-- `GET /api/branding` - Get branding data from Header.astro and Footer.astro
-- `PUT /api/branding` - Update Header.astro and Footer.astro
-
-### Google Search Console
-- `GET /api/search-console/config` - Get Search Console configuration
-- `POST /api/search-console/credentials` - Save API credentials (service account JSON)
-- `DELETE /api/search-console/credentials` - Clear credentials
-- `GET /api/search-console/sites` - List verified sites from service account
-- `POST /api/search-console/select-site` - Select a site for indexing
-- `GET /api/search-console/status` - Get URL indexing status (uses Indexing API)
-- `POST /api/search-console/submit` - Submit URLs for indexing (uses Google Indexing API)
-- `GET /api/search-console/sitemaps` - List submitted sitemaps for selected site
-- `POST /api/search-console/submit-sitemap` - Submit sitemap to Google
-- `POST /api/search-console/verify-domain` - Get verification token for a domain
-- `POST /api/search-console/add-site` - Verify and add site to Search Console
-- `POST /api/search-console/commit-verification` - Commit verification file to repository
-
-### Sitemap Auto-Generation
-- `POST /api/sitemap/auto-generate` - Generate sitemap.xml, commit to repo, and submit to Google
-- `POST /api/sitemap/save` - Save sitemap.xml to repository
-
-### Vercel
-- `GET /api/vercel/config` - Get Vercel configuration status
-- `POST /api/vercel/token` - Save Vercel API token
-- `DELETE /api/vercel/token` - Clear Vercel token
-- `GET /api/vercel/projects` - List Vercel projects
-- `POST /api/vercel/project/link` - Link or create Vercel project
-- `POST /api/vercel/project/unlink` - Unlink Vercel project
-- `POST /api/vercel/project/auto-link` - Auto-detect or create Vercel project based on connected repo
-- `GET /api/vercel/deployments` - Get deployments list
-- `POST /api/vercel/deployments` - Trigger new deployment
-- `GET /api/vercel/domains` - Get project domains
-- `POST /api/vercel/domains` - Add domain
-- `DELETE /api/vercel/domains/:domain` - Remove domain
-- `POST /api/vercel/domains/:domain/verify` - Verify domain
-
-### Sitemap
-- `GET /api/sitemap.xml` - Generate sitemap XML for connected repository
-
-## Design System
-
-- **Primary Color**: #FF5D01 (Astro Orange)
-- **Fonts**: Inter (UI), JetBrains Mono (code)
-- **Layout**: Split-panel with collapsible sidebar
-- **Components**: Card-based design with subtle shadows
-
-## Development
-
-The application runs on port 5000 with:
-- Express backend serving API endpoints
-- Vite dev server for frontend hot-reload
-
-### GitHub Authentication Options
-
-The CMS supports two GitHub authentication methods:
-
-1. **GitHub OAuth** (Recommended) - "Login with GitHub" button for easy authentication
-   - Requires setting `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` environment variables
-   - Create a GitHub OAuth App at https://github.com/settings/developers
-   - Set callback URL to: `https://your-domain.com/api/auth/github/callback`
-
-2. **Personal Access Token** - For users who prefer manual token entry
-   - Create a token at https://github.com/settings/tokens/new with `repo` scope
-   - Token is stored in session and used to access repositories
-
-## Self-Hosting Guide
-
-This CMS is designed to be self-hosted on any server. Here's how to deploy:
-
-### Prerequisites
-- Node.js 18+ 
-- npm or yarn
-
-### Environment Variables
-Set these environment variables for your deployment:
-
-```bash
-# Required for session security (generate a random string)
-SESSION_SECRET=your_random_secret_here
-
-# Optional: Port (defaults to 5000)
-PORT=5000
-
-# Optional: GitHub OAuth (recommended for easy login)
-GITHUB_CLIENT_ID=your_github_oauth_client_id
-GITHUB_CLIENT_SECRET=your_github_oauth_client_secret
-
-# Optional: Supabase for persistent settings storage
-SUPABASE_URL=https://your-project.supabase.co
-SUPABASE_ANON_KEY=your-anon-key
-```
-
-### Supabase Setup (Optional)
-
-For persistent storage of user settings (API keys, tokens), you can configure Supabase:
-
-1. Create a free Supabase project at https://supabase.com
-2. Get your project URL and anon key from Settings > API
-3. Set the environment variables above
-4. Create the `user_settings` table using this SQL:
-
-```sql
-CREATE TABLE user_settings (
-  id SERIAL PRIMARY KEY,
-  github_token_hash VARCHAR(64) UNIQUE NOT NULL,
-  github_username VARCHAR(255) NOT NULL,
-  gemini_api_key TEXT,
-  vercel_token TEXT,
-  vercel_team_id VARCHAR(255),
-  vercel_project_id VARCHAR(255),
-  search_console_client_email TEXT,
-  search_console_private_key TEXT,
-  search_console_site_url TEXT,
-  adsense_publisher_id VARCHAR(255),
-  adsense_slots JSONB,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX idx_user_settings_token_hash ON user_settings(github_token_hash);
-```
-
-**Notes**: 
-- **Security**: When Supabase is configured, SESSION_SECRET is **required**. The app will refuse to start without it because all API keys and tokens are encrypted using AES-256-GCM with a key derived from SESSION_SECRET.
-- Without Supabase, settings are stored in memory and will be lost on restart.
-- This CMS is designed for single-user self-hosting. If multiple users authenticate with different GitHub tokens simultaneously, settings may conflict. For multi-user deployments, consider running separate instances.
-
-### Build & Run
-
-```bash
-# Install dependencies
-npm install
-
-# Build for production
-npm run build
-
-# Start production server
-npm start
-```
-
-### Docker Deployment (Optional)
-
-```dockerfile
-FROM node:20-alpine
-WORKDIR /app
-COPY package*.json ./
-RUN npm ci --only=production
-COPY . .
-RUN npm run build
-EXPOSE 5000
-ENV NODE_ENV=production
-CMD ["npm", "start"]
-```
-
-### Features Configuration
-
-All features work without external dependencies:
-- **GitHub Integration**: Uses GITHUB_TOKEN env var or manual token via Settings
-- **Vercel Deployment**: Configure via Vercel API token in the app
-- **Google Search Console**: Configure credentials directly in the app
-- **AI Post Generation**: Requires Gemini API key (configured in app)
+EG Press is a web-based Content Management System (CMS) designed for managing blog templates with seamless GitHub integration. It provides a visual interface for users to manage blog content directly from their GitHub repositories, offering features like CRUD operations for posts, theme customization, branding, AdSense management, and static page editing. The system aims to simplify the process of maintaining a blog hosted on GitHub, providing tools for content creation, deployment, and SEO. Key capabilities include AI post generation, Google Search Console integration, Vercel deployment management, and sitemap generation. The project's ambition is to offer a comprehensive, user-friendly platform for developers and content creators to manage their GitHub-hosted blogs efficiently.
 
 ## User Preferences
 
 - Dark/light mode toggle available
 - Sidebar collapsible for more editing space
 - Resizable panels in editor views
+
+## System Architecture
+
+The system comprises a React-based frontend and an Express.js backend.
+
+**UI/UX Decisions:**
+- **Design System:** Utilizes Shadcn UI components, Tailwind CSS for styling.
+- **Color Scheme:** Primary color #FF5D01 (Astro Orange) with six customizable options (primary, secondary, background, text, accent, success).
+- **Typography:** Inter for UI elements and JetBrains Mono for code.
+- **Layout:** Features a split-panel design with a collapsible sidebar and resizable panels for an optimized editing experience.
+- **Components:** Card-based design with subtle shadows.
+- **Onboarding:** Includes an onboarding wizard and a setup progress dashboard.
+
+**Technical Implementations & Feature Specifications:**
+- **Frontend:** Built with React, utilizing Wouter for routing and Monaco Editor for a rich Markdown editing experience with live preview. TanStack Query is used for state management.
+- **Backend:** Express.js handles API endpoints and integrates with various external services.
+- **GitHub Integration:** Connects to repositories via `owner/repo` format, allowing file tree navigation, direct file editing, and committing changes. Supports GitHub OAuth and Personal Access Tokens for authentication.
+- **Content Management:** CRUD operations for blog posts with frontmatter support and tag management.
+- **Theming:** Live preview for color customizations, saving configurations as JSON.
+- **File Management:** A file browser for navigating and editing repository files with syntax highlighting.
+- **Branding Editor:** Configuration for site name, logo, favicon, social links, and author info, directly modifying `Header.astro` and `Footer.astro` files if present.
+- **AdSense Manager:** Configuration for Google AdSense with multiple ad slot placements.
+- **Static Pages Editor:** Edits non-blog pages.
+- **AI Post Generation:** Leverages Google Gemini AI for generating blog posts.
+- **Google Search Console Integration:** Service account integration for site selection, URL indexing, sitemap submission, and domain verification, with encrypted storage for credentials.
+- **Vercel Integration:** Automatic project linking, deployment triggering, and domain management for Vercel-hosted sites.
+- **Sitemap Generation:** Automatic `sitemap.xml` generation, commit to repository, and submission to Google.
+- **Site Cloner:** Functionality to clone existing repositories to create new blog sites.
+- **Persistence (Optional):** Supports Supabase for persistent storage of user and repository settings, including encrypted API keys and service accounts. Without Supabase, settings are in-memory.
+
+**System Design Choices:**
+- **API-driven:** A comprehensive set of RESTful API endpoints for all functionalities.
+- **Modular:** Clear separation between client and server, with shared types.
+- **Security:** Session management with `SESSION_SECRET` and AES-256-GCM encryption for sensitive data when Supabase is used.
+- **Validation:** Zod for schema validation.
+
+## External Dependencies
+
+- **GitHub:** For repository management, content storage, and version control. Uses Octokit for API interactions.
+- **Google Gemini AI:** For AI-powered blog post generation.
+- **Vercel:** For deployment and domain management of blog sites.
+- **Google Search Console (and Indexing API):** For SEO, site verification, sitemap submission, and URL indexing.
+- **Supabase (Optional):** Used for persistent storage of user settings and repository-specific configurations (API keys, tokens, site configs).

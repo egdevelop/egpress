@@ -13,7 +13,6 @@ export const supabase = supabaseUrl && supabaseKey
   : null;
 
 // ==================== ENCRYPTION HELPERS ====================
-// Require SESSION_SECRET for encryption - fail fast if missing
 const ENCRYPTION_KEY = process.env.SESSION_SECRET;
 
 if (!ENCRYPTION_KEY) {
@@ -25,7 +24,6 @@ function deriveKey(secret: string): Buffer {
 }
 
 export function encrypt(text: string): string {
-  // Require encryption key - fail if not configured
   if (!ENCRYPTION_KEY) {
     throw new Error('Cannot encrypt - SESSION_SECRET not configured. Sensitive data storage requires encryption.');
   }
@@ -36,7 +34,6 @@ export function encrypt(text: string): string {
     const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
     const encrypted = Buffer.concat([cipher.update(text, 'utf8'), cipher.final()]);
     const authTag = cipher.getAuthTag();
-    // Format: ENC:iv:authTag:encrypted (all base64)
     return `ENC:${iv.toString('base64')}:${authTag.toString('base64')}:${encrypted.toString('base64')}`;
   } catch (err) {
     console.error('Encryption error:', err);
@@ -45,9 +42,8 @@ export function encrypt(text: string): string {
 }
 
 export function decrypt(encryptedText: string): string {
-  // Check if it's an encrypted format (starts with ENC:)
   if (!encryptedText.startsWith('ENC:')) {
-    return encryptedText; // Return as-is if not encrypted (legacy data)
+    return encryptedText;
   }
   
   if (!ENCRYPTION_KEY) {
@@ -56,7 +52,7 @@ export function decrypt(encryptedText: string): string {
   }
   
   try {
-    const parts = encryptedText.substring(4).split(':'); // Remove 'ENC:' prefix
+    const parts = encryptedText.substring(4).split(':');
     if (parts.length !== 3) {
       throw new Error('Invalid encrypted format');
     }
@@ -76,40 +72,40 @@ export function decrypt(encryptedText: string): string {
   }
 }
 
-// Legacy user settings (for migration compatibility)
+function hashToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
+// ==================== TYPE DEFINITIONS ====================
+
+// User-level settings (keyed by github_username)
+// These credentials are the SAME across all repositories
 export interface UserSettings {
-  github_token_hash: string;
+  id?: number;
   github_username: string;
+  github_token_hash: string;
+  // User-level credentials (same for all repos)
   gemini_api_key?: string;
   vercel_token?: string;
-  vercel_team_id?: string;
-  vercel_project_id?: string;
-  search_console_client_email?: string;
-  search_console_private_key?: string;
-  search_console_site_url?: string;
-  adsense_publisher_id?: string;
-  adsense_slots?: Record<string, string>;
+  search_console_service_account?: string; // Encrypted full JSON
+  // Timestamps
   created_at?: string;
   updated_at?: string;
 }
 
-// New repository-based settings
+// Repository-level settings (keyed by full_name = owner/repo)
+// These are specific to each repository
 export interface RepositorySettings {
   id?: number;
-  repository: string; // owner/repo format
-  github_token_hash: string;
+  full_name: string; // owner/repo format - matches Supabase column name
   github_username: string;
-  // Vercel settings
-  vercel_token?: string;
-  vercel_team_id?: string;
+  // Vercel project linking (which project is linked to this repo)
   vercel_project_id?: string;
+  vercel_team_id?: string;
   vercel_project_name?: string;
-  // Google Search Console settings (service account)
-  search_console_service_account?: string; // Full JSON key
+  // Google Search Console site (which site is linked to this repo)
   search_console_site_url?: string;
-  // Gemini AI
-  gemini_api_key?: string;
-  // AdSense
+  // AdSense (per-repo configuration)
   adsense_publisher_id?: string;
   adsense_slots?: Record<string, string>;
   // Timestamps
@@ -117,20 +113,221 @@ export interface RepositorySettings {
   updated_at?: string;
 }
 
-function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
+// ==================== USER SETTINGS (User-Level Credentials) ====================
+
+export async function getUserSettings(githubUsername: string): Promise<UserSettings | null> {
+  if (!supabase) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('user_settings')
+      .select('*')
+      .eq('github_username', githubUsername)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return null; // Not found
+      }
+      console.error('Error loading user settings:', error);
+      return null;
+    }
+    
+    const settings = data as UserSettings;
+    
+    // Decrypt sensitive fields
+    if (settings.search_console_service_account) {
+      try {
+        settings.search_console_service_account = decrypt(settings.search_console_service_account);
+      } catch (e) {
+        console.warn('Failed to decrypt search_console_service_account');
+        settings.search_console_service_account = undefined;
+      }
+    }
+    
+    return settings;
+  } catch (err) {
+    console.error('Supabase load error:', err);
+    return null;
+  }
 }
 
-// ==================== REPOSITORY-BASED SETTINGS ====================
+export async function saveUserSettings(
+  githubUsername: string,
+  githubToken: string,
+  settings: Partial<Omit<UserSettings, 'id' | 'github_username' | 'github_token_hash' | 'created_at' | 'updated_at'>>
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  const tokenHash = hashToken(githubToken);
+  
+  try {
+    const { error } = await supabase
+      .from('user_settings')
+      .upsert({
+        github_username: githubUsername,
+        github_token_hash: tokenHash,
+        ...settings,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'github_username',
+      });
+    
+    if (error) {
+      console.error('Error saving user settings:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase save error:', err);
+    return false;
+  }
+}
 
-export async function getRepositorySettings(repository: string): Promise<RepositorySettings | null> {
+export async function updateUserGeminiKey(githubUsername: string, geminiKey: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    // Use upsert to handle both create and update
+    const { error } = await supabase
+      .from('user_settings')
+      .upsert({
+        github_username: githubUsername,
+        gemini_api_key: geminiKey || null,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'github_username',
+      });
+    
+    if (error) {
+      console.error('Error updating Gemini key:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function updateUserVercelToken(githubUsername: string, vercelToken: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('user_settings')
+      .upsert({
+        github_username: githubUsername,
+        vercel_token: vercelToken || null,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'github_username',
+      });
+    
+    if (error) {
+      console.error('Error updating Vercel token:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function updateUserSearchConsoleCredentials(
+  githubUsername: string,
+  serviceAccountJson: string
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    // Encrypt the service account JSON before storing
+    const encryptedJson = serviceAccountJson ? encrypt(serviceAccountJson) : null;
+    
+    const { error } = await supabase
+      .from('user_settings')
+      .upsert({
+        github_username: githubUsername,
+        search_console_service_account: encryptedJson,
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'github_username',
+      });
+    
+    if (error) {
+      console.error('Error updating Search Console credentials:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function clearUserSearchConsoleCredentials(githubUsername: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('user_settings')
+      .update({
+        search_console_service_account: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('github_username', githubUsername);
+    
+    if (error) {
+      console.error('Error clearing Search Console credentials:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+export async function clearUserVercelToken(githubUsername: string): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('user_settings')
+      .update({
+        vercel_token: null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('github_username', githubUsername);
+    
+    if (error) {
+      console.error('Error clearing Vercel token:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+// ==================== REPOSITORY SETTINGS (Per-Repo Linking) ====================
+
+export async function getRepositorySettings(fullName: string): Promise<RepositorySettings | null> {
   if (!supabase) return null;
   
   try {
     const { data, error } = await supabase
       .from('repository_settings')
       .select('*')
-      .eq('repository', repository)
+      .eq('full_name', fullName)
       .single();
     
     if (error) {
@@ -141,14 +338,7 @@ export async function getRepositorySettings(repository: string): Promise<Reposit
       return null;
     }
     
-    const settings = data as RepositorySettings;
-    
-    // Decrypt sensitive fields
-    if (settings.search_console_service_account) {
-      settings.search_console_service_account = decrypt(settings.search_console_service_account);
-    }
-    
-    return settings;
+    return data as RepositorySettings;
   } catch (err) {
     console.error('Supabase load error:', err);
     return null;
@@ -156,26 +346,22 @@ export async function getRepositorySettings(repository: string): Promise<Reposit
 }
 
 export async function saveRepositorySettings(
-  repository: string, 
-  githubToken: string, 
+  fullName: string,
   githubUsername: string,
-  settings: Partial<RepositorySettings>
+  settings: Partial<Omit<RepositorySettings, 'id' | 'full_name' | 'github_username' | 'created_at' | 'updated_at'>>
 ): Promise<boolean> {
   if (!supabase) return false;
-  
-  const tokenHash = hashToken(githubToken);
   
   try {
     const { error } = await supabase
       .from('repository_settings')
       .upsert({
-        repository,
-        github_token_hash: tokenHash,
+        full_name: fullName,
         github_username: githubUsername,
         ...settings,
         updated_at: new Date().toISOString(),
       }, {
-        onConflict: 'repository',
+        onConflict: 'full_name',
       });
     
     if (error) {
@@ -191,28 +377,31 @@ export async function saveRepositorySettings(
 }
 
 export async function updateRepositoryVercel(
-  repository: string,
-  vercelToken: string,
-  teamId?: string,
+  fullName: string,
+  githubUsername: string,
   projectId?: string,
+  teamId?: string,
   projectName?: string
 ): Promise<boolean> {
   if (!supabase) return false;
   
   try {
+    // Use upsert to create row if not exists
     const { error } = await supabase
       .from('repository_settings')
-      .update({ 
-        vercel_token: vercelToken,
-        vercel_team_id: teamId || null,
+      .upsert({
+        full_name: fullName,
+        github_username: githubUsername,
         vercel_project_id: projectId || null,
+        vercel_team_id: teamId || null,
         vercel_project_name: projectName || null,
         updated_at: new Date().toISOString(),
-      })
-      .eq('repository', repository);
+      }, {
+        onConflict: 'full_name',
+      });
     
     if (error) {
-      console.error('Error updating Vercel config:', error);
+      console.error('Error updating repository Vercel config:', error);
       return false;
     }
     
@@ -223,23 +412,22 @@ export async function updateRepositoryVercel(
   }
 }
 
-export async function clearRepositoryVercel(repository: string): Promise<boolean> {
+export async function clearRepositoryVercel(fullName: string): Promise<boolean> {
   if (!supabase) return false;
   
   try {
     const { error } = await supabase
       .from('repository_settings')
-      .update({ 
-        vercel_token: null,
-        vercel_team_id: null,
+      .update({
         vercel_project_id: null,
+        vercel_team_id: null,
         vercel_project_name: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('repository', repository);
+      .eq('full_name', fullName);
     
     if (error) {
-      console.error('Error clearing Vercel config:', error);
+      console.error('Error clearing repository Vercel config:', error);
       return false;
     }
     
@@ -250,28 +438,28 @@ export async function clearRepositoryVercel(repository: string): Promise<boolean
   }
 }
 
-export async function updateRepositorySearchConsole(
-  repository: string,
-  serviceAccountJson: string,
-  siteUrl?: string
+export async function updateRepositorySiteUrl(
+  fullName: string,
+  githubUsername: string,
+  siteUrl: string
 ): Promise<boolean> {
   if (!supabase) return false;
   
   try {
-    // Encrypt the service account JSON before storing
-    const encryptedJson = encrypt(serviceAccountJson);
-    
+    // Use upsert to create row if not exists
     const { error } = await supabase
       .from('repository_settings')
-      .update({ 
-        search_console_service_account: encryptedJson,
+      .upsert({
+        full_name: fullName,
+        github_username: githubUsername,
         search_console_site_url: siteUrl || null,
         updated_at: new Date().toISOString(),
-      })
-      .eq('repository', repository);
+      }, {
+        onConflict: 'full_name',
+      });
     
     if (error) {
-      console.error('Error updating Search Console config:', error);
+      console.error('Error updating repository site URL:', error);
       return false;
     }
     
@@ -282,45 +470,20 @@ export async function updateRepositorySearchConsole(
   }
 }
 
-export async function clearRepositorySearchConsole(repository: string): Promise<boolean> {
+export async function clearRepositorySiteUrl(fullName: string): Promise<boolean> {
   if (!supabase) return false;
   
   try {
     const { error } = await supabase
       .from('repository_settings')
-      .update({ 
-        search_console_service_account: null,
+      .update({
         search_console_site_url: null,
         updated_at: new Date().toISOString(),
       })
-      .eq('repository', repository);
+      .eq('full_name', fullName);
     
     if (error) {
-      console.error('Error clearing Search Console config:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase update error:', err);
-    return false;
-  }
-}
-
-export async function updateRepositoryGemini(repository: string, geminiKey: string): Promise<boolean> {
-  if (!supabase) return false;
-  
-  try {
-    const { error } = await supabase
-      .from('repository_settings')
-      .update({ 
-        gemini_api_key: geminiKey,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('repository', repository);
-    
-    if (error) {
-      console.error('Error updating Gemini key:', error);
+      console.error('Error clearing repository site URL:', error);
       return false;
     }
     
@@ -332,7 +495,8 @@ export async function updateRepositoryGemini(repository: string, geminiKey: stri
 }
 
 export async function updateRepositoryAdsense(
-  repository: string,
+  fullName: string,
+  githubUsername: string,
   publisherId: string,
   slots: Record<string, string>
 ): Promise<boolean> {
@@ -341,15 +505,18 @@ export async function updateRepositoryAdsense(
   try {
     const { error } = await supabase
       .from('repository_settings')
-      .update({ 
-        adsense_publisher_id: publisherId,
-        adsense_slots: slots,
+      .upsert({
+        full_name: fullName,
+        github_username: githubUsername,
+        adsense_publisher_id: publisherId || null,
+        adsense_slots: slots || null,
         updated_at: new Date().toISOString(),
-      })
-      .eq('repository', repository);
+      }, {
+        onConflict: 'full_name',
+      });
     
     if (error) {
-      console.error('Error updating AdSense config:', error);
+      console.error('Error updating repository AdSense config:', error);
       return false;
     }
     
@@ -360,14 +527,14 @@ export async function updateRepositoryAdsense(
   }
 }
 
-export async function deleteRepositorySettings(repository: string): Promise<boolean> {
+export async function deleteRepositorySettings(fullName: string): Promise<boolean> {
   if (!supabase) return false;
   
   try {
     const { error } = await supabase
       .from('repository_settings')
       .delete()
-      .eq('repository', repository);
+      .eq('full_name', fullName);
     
     if (error) {
       console.error('Error deleting repository settings:', error);
@@ -381,98 +548,60 @@ export async function deleteRepositorySettings(repository: string): Promise<bool
   }
 }
 
-// ==================== LEGACY USER SETTINGS (for backward compatibility) ====================
-
-export async function saveUserSettings(githubToken: string, githubUsername: string, settings: Partial<UserSettings>): Promise<boolean> {
-  if (!supabase) return false;
-  
-  const tokenHash = hashToken(githubToken);
-  
-  try {
-    // First check if user already exists by username
-    const { data: existingUser } = await supabase
-      .from('user_settings')
-      .select('id')
-      .eq('github_username', githubUsername)
-      .single();
-    
-    if (existingUser) {
-      // Update existing record by username (updates token hash too for fresh OAuth tokens)
-      const { error } = await supabase
-        .from('user_settings')
-        .update({
-          github_token_hash: tokenHash,
-          ...settings,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('github_username', githubUsername);
-      
-      if (error) {
-        console.error('Error updating settings in Supabase:', error);
-        return false;
-      }
-    } else {
-      // Create new record
-      const { error } = await supabase
-        .from('user_settings')
-        .insert({
-          github_token_hash: tokenHash,
-          github_username: githubUsername,
-          ...settings,
-          updated_at: new Date().toISOString(),
-        });
-      
-      if (error) {
-        console.error('Error creating settings in Supabase:', error);
-        return false;
-      }
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase save error:', err);
-    return false;
-  }
-}
+// ==================== LEGACY COMPATIBILITY ====================
+// These functions are kept for backward compatibility during migration
 
 export async function loadUserSettings(githubToken: string, username?: string): Promise<UserSettings | null> {
-  if (!supabase) return null;
-  
-  try {
-    // First try to load by username (works for both OAuth and PAT)
-    if (username) {
-      const { data: userDataByUsername, error: usernameError } = await supabase
-        .from('user_settings')
-        .select('*')
-        .eq('github_username', username)
-        .single();
-      
-      if (userDataByUsername && !usernameError) {
-        return userDataByUsername as UserSettings;
-      }
-    }
-    
-    // Fall back to token hash for legacy compatibility
-    const tokenHash = hashToken(githubToken);
-    const { data, error } = await supabase
-      .from('user_settings')
-      .select('*')
-      .eq('github_token_hash', tokenHash)
-      .single();
-    
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return null;
-      }
-      console.error('Error loading settings from Supabase:', error);
-      return null;
-    }
-    
-    return data as UserSettings;
-  } catch (err) {
-    console.error('Supabase load error:', err);
-    return null;
-  }
+  if (!username) return null;
+  return getUserSettings(username);
+}
+
+export async function updateGeminiKey(githubToken: string, geminiKey: string, username?: string): Promise<boolean> {
+  if (!username) return false;
+  return updateUserGeminiKey(username, geminiKey);
+}
+
+export async function updateVercelConfig(
+  githubToken: string,
+  vercelToken: string,
+  teamId?: string,
+  projectId?: string,
+  username?: string
+): Promise<boolean> {
+  if (!username) return false;
+  return updateUserVercelToken(username, vercelToken);
+}
+
+export async function updateSearchConsoleConfig(
+  githubToken: string,
+  clientEmail: string,
+  privateKey: string,
+  siteUrl: string,
+  username?: string
+): Promise<boolean> {
+  // This is legacy - new code should use updateUserSearchConsoleCredentials
+  // and updateRepositorySiteUrl separately
+  return false;
+}
+
+export async function updateAdsenseConfig(
+  githubToken: string,
+  publisherId: string,
+  slots: Record<string, string>,
+  username?: string
+): Promise<boolean> {
+  // Legacy - AdSense is now per-repository
+  return false;
+}
+
+export async function clearVercelConfig(githubToken: string, username?: string): Promise<boolean> {
+  if (!username) return false;
+  return clearUserVercelToken(username);
+}
+
+export async function clearSearchConsoleConfig(githubToken: string, username?: string): Promise<boolean> {
+  if (!username) return false;
+  return clearUserSearchConsoleCredentials(username);
 }
 
 export async function deleteUserSettings(githubToken: string): Promise<boolean> {
@@ -487,203 +616,13 @@ export async function deleteUserSettings(githubToken: string): Promise<boolean> 
       .eq('github_token_hash', tokenHash);
     
     if (error) {
-      console.error('Error deleting settings from Supabase:', error);
+      console.error('Error deleting user settings:', error);
       return false;
     }
     
     return true;
   } catch (err) {
     console.error('Supabase delete error:', err);
-    return false;
-  }
-}
-
-// Legacy update functions - now use username for lookup (supports OAuth)
-export async function updateGeminiKey(githubToken: string, geminiKey: string, username?: string): Promise<boolean> {
-  if (!supabase) return false;
-  
-  try {
-    // Use username if provided, fallback to token hash
-    const filter = username 
-      ? { column: 'github_username', value: username }
-      : { column: 'github_token_hash', value: hashToken(githubToken) };
-    
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ 
-        gemini_api_key: geminiKey,
-        updated_at: new Date().toISOString(),
-      })
-      .eq(filter.column, filter.value);
-    
-    if (error) {
-      console.error('Error updating Gemini key:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase update error:', err);
-    return false;
-  }
-}
-
-export async function updateVercelConfig(githubToken: string, vercelToken: string, teamId?: string, projectId?: string, username?: string): Promise<boolean> {
-  if (!supabase) return false;
-  
-  try {
-    const filter = username 
-      ? { column: 'github_username', value: username }
-      : { column: 'github_token_hash', value: hashToken(githubToken) };
-    
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ 
-        vercel_token: vercelToken,
-        vercel_team_id: teamId || null,
-        vercel_project_id: projectId || null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq(filter.column, filter.value);
-    
-    if (error) {
-      console.error('Error updating Vercel config:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase update error:', err);
-    return false;
-  }
-}
-
-export async function updateSearchConsoleConfig(
-  githubToken: string, 
-  clientEmail: string, 
-  privateKey: string, 
-  siteUrl: string,
-  username?: string
-): Promise<boolean> {
-  if (!supabase) return false;
-  
-  try {
-    const filter = username 
-      ? { column: 'github_username', value: username }
-      : { column: 'github_token_hash', value: hashToken(githubToken) };
-    
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ 
-        search_console_client_email: clientEmail,
-        search_console_private_key: privateKey,
-        search_console_site_url: siteUrl,
-        updated_at: new Date().toISOString(),
-      })
-      .eq(filter.column, filter.value);
-    
-    if (error) {
-      console.error('Error updating Search Console config:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase update error:', err);
-    return false;
-  }
-}
-
-export async function updateAdsenseConfig(
-  githubToken: string, 
-  publisherId: string,
-  slots: Record<string, string>,
-  username?: string
-): Promise<boolean> {
-  if (!supabase) return false;
-  
-  try {
-    const filter = username 
-      ? { column: 'github_username', value: username }
-      : { column: 'github_token_hash', value: hashToken(githubToken) };
-    
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ 
-        adsense_publisher_id: publisherId,
-        adsense_slots: slots,
-        updated_at: new Date().toISOString(),
-      })
-      .eq(filter.column, filter.value);
-    
-    if (error) {
-      console.error('Error updating AdSense config:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase update error:', err);
-    return false;
-  }
-}
-
-export async function clearVercelConfig(githubToken: string, username?: string): Promise<boolean> {
-  if (!supabase) return false;
-  
-  try {
-    const filter = username 
-      ? { column: 'github_username', value: username }
-      : { column: 'github_token_hash', value: hashToken(githubToken) };
-    
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ 
-        vercel_token: null,
-        vercel_team_id: null,
-        vercel_project_id: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq(filter.column, filter.value);
-    
-    if (error) {
-      console.error('Error clearing Vercel config:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase update error:', err);
-    return false;
-  }
-}
-
-export async function clearSearchConsoleConfig(githubToken: string, username?: string): Promise<boolean> {
-  if (!supabase) return false;
-  
-  try {
-    const filter = username 
-      ? { column: 'github_username', value: username }
-      : { column: 'github_token_hash', value: hashToken(githubToken) };
-    
-    const { error } = await supabase
-      .from('user_settings')
-      .update({ 
-        search_console_client_email: null,
-        search_console_private_key: null,
-        search_console_site_url: null,
-        updated_at: new Date().toISOString(),
-      })
-      .eq(filter.column, filter.value);
-    
-    if (error) {
-      console.error('Error clearing Search Console config:', error);
-      return false;
-    }
-    
-    return true;
-  } catch (err) {
-    console.error('Supabase update error:', err);
     return false;
   }
 }
