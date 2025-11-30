@@ -143,6 +143,7 @@ export default function PostEditor() {
   const [, navigate] = useLocation();
   const [showPreview, setShowPreview] = useState(true);
   const [commitMessage, setCommitMessage] = useState("");
+  const [originalPubDate, setOriginalPubDate] = useState<string | null>(null);
   const { toast } = useToast();
   const { theme } = useTheme();
 
@@ -158,13 +159,15 @@ export default function PostEditor() {
     enabled: !!slug && !!repoData?.data,
   });
 
+  const [defaultPubDate] = useState(() => new Date().toISOString());
+  
   const form = useForm<PostFormValues>({
     resolver: zodResolver(postFormSchema),
     defaultValues: {
       title: "",
       slug: "",
       description: "",
-      pubDate: new Date().toISOString().split("T")[0],
+      pubDate: defaultPubDate.split("T")[0],
       heroImage: "",
       author: "",
       category: "",
@@ -174,6 +177,12 @@ export default function PostEditor() {
       content: "# Hello World\n\nStart writing your blog post here...",
     },
   });
+  
+  useEffect(() => {
+    if (isNew && !originalPubDate) {
+      setOriginalPubDate(defaultPubDate);
+    }
+  }, [isNew, defaultPubDate, originalPubDate]);
 
   useEffect(() => {
     if (postData?.data) {
@@ -181,6 +190,7 @@ export default function PostEditor() {
       const authorName = post.author 
         ? (typeof post.author === 'string' ? post.author : post.author.name) 
         : "";
+      setOriginalPubDate(post.pubDate);
       form.reset({
         title: post.title,
         slug: post.slug,
@@ -202,8 +212,22 @@ export default function PostEditor() {
     mutationFn: async (data: PostFormValues) => {
       const url = isNew ? "/api/posts" : `/api/posts/${slug}`;
       const method = isNew ? "POST" : "PUT";
+      
+      let finalPubDate = data.pubDate;
+      if (originalPubDate) {
+        const originalDatePart = originalPubDate.split("T")[0];
+        if (data.pubDate === originalDatePart) {
+          finalPubDate = originalPubDate;
+        } else {
+          finalPubDate = new Date(data.pubDate + "T" + new Date().toISOString().split("T")[1]).toISOString();
+        }
+      } else {
+        finalPubDate = new Date(data.pubDate + "T" + new Date().toISOString().split("T")[1]).toISOString();
+      }
+      
       const response = await apiRequest(method, url, {
         ...data,
+        pubDate: finalPubDate,
         commitMessage: commitMessage || `${isNew ? "Create" : "Update"} post: ${data.title}`,
       });
       return response.json();
