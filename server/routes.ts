@@ -1426,6 +1426,13 @@ export async function registerRoutes(
     try {
       const { imageData, mimeType, filename } = req.body;
       
+      console.log("Upload base64 image request:", {
+        hasImageData: !!imageData,
+        imageDataLength: imageData?.length,
+        mimeType,
+        filename,
+      });
+      
       if (!imageData) {
         return res.status(400).json({ success: false, error: "No image data provided" });
       }

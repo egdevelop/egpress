@@ -349,7 +349,13 @@ export default function AIGenerator() {
       
       let heroImagePath: string | undefined;
       
-      if (optimizedImage) {
+      if (optimizedImage && optimizedImage.dataUrl) {
+        console.log("Uploading optimized image...", {
+          hasDataUrl: !!optimizedImage.dataUrl,
+          mimeType: optimizedImage.mimeType,
+          dataUrlLength: optimizedImage.dataUrl?.length,
+        });
+        
         try {
           const uploadResponse = await apiRequest("POST", "/api/upload-image-base64", {
             imageData: optimizedImage.dataUrl,
@@ -357,12 +363,25 @@ export default function AIGenerator() {
             filename: slug,
           });
           const uploadResult = await uploadResponse.json();
-          if (uploadResult.success) {
+          console.log("Upload result:", uploadResult);
+          
+          if (uploadResult.success && uploadResult.path) {
             heroImagePath = uploadResult.path;
+            console.log("Hero image path set to:", heroImagePath);
+          } else {
+            console.error("Upload response not successful:", uploadResult);
+            throw new Error(uploadResult.error || "Image upload failed");
           }
-        } catch (err) {
+        } catch (err: any) {
           console.error("Failed to upload hero image:", err);
+          toast({
+            title: "Image Upload Failed",
+            description: err.message || "Could not upload hero image, but post will still be saved",
+            variant: "destructive",
+          });
         }
+      } else {
+        console.log("No optimized image to upload", { optimizedImage });
       }
       
       const authorName = authData?.data?.user?.name || authData?.data?.user?.login || "Author";
