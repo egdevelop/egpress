@@ -23,6 +23,7 @@ import AIGenerator from "@/pages/ai-generator";
 import SearchConsole from "@/pages/search-console";
 import VercelPage from "@/pages/vercel";
 import ContentDefaultsPage from "@/pages/content-defaults";
+import PerformancePage from "@/pages/performance";
 import Login from "@/pages/login";
 import { Loader2 } from "lucide-react";
 
@@ -42,6 +43,7 @@ function Router() {
       <Route path="/vercel" component={VercelPage} />
       <Route path="/content-defaults" component={ContentDefaultsPage} />
       <Route path="/clone" component={CloneSite} />
+      <Route path="/performance" component={PerformancePage} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>

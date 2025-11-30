@@ -20,7 +20,8 @@ import {
   Lock,
   Unplug,
   ArrowRightLeft,
-  FileSliders
+  FileSliders,
+  Zap
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -148,6 +149,12 @@ const integrationsItems = [
 ];
 
 const systemItems = [
+  {
+    title: "Performance",
+    url: "/performance",
+    icon: Zap,
+    description: "Image optimization & deploy",
+  },
   {
     title: "Clone Site",
     url: "/clone",

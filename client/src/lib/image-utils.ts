@@ -15,12 +15,73 @@ export interface OptimizeOptions {
   format?: 'image/jpeg' | 'image/webp' | 'image/png';
 }
 
+export type CompressionPreset = 'aggressive' | 'balanced' | 'quality' | 'custom';
+
+export interface PresetConfig {
+  name: string;
+  description: string;
+  maxWidth: number;
+  maxHeight: number;
+  quality: number;
+  format: 'image/jpeg' | 'image/webp' | 'image/png';
+  estimatedSaving: string;
+}
+
+export const COMPRESSION_PRESETS: Record<CompressionPreset, PresetConfig> = {
+  aggressive: {
+    name: 'Aggressive',
+    description: 'Maximum compression, smaller file size, slight quality loss',
+    maxWidth: 800,
+    maxHeight: 600,
+    quality: 0.6,
+    format: 'image/webp',
+    estimatedSaving: '70-85%',
+  },
+  balanced: {
+    name: 'Balanced',
+    description: 'Good balance between quality and file size',
+    maxWidth: 1200,
+    maxHeight: 800,
+    quality: 0.75,
+    format: 'image/webp',
+    estimatedSaving: '50-70%',
+  },
+  quality: {
+    name: 'Quality',
+    description: 'Higher quality, larger file size',
+    maxWidth: 1600,
+    maxHeight: 1200,
+    quality: 0.9,
+    format: 'image/webp',
+    estimatedSaving: '30-50%',
+  },
+  custom: {
+    name: 'Custom',
+    description: 'Define your own compression settings',
+    maxWidth: 1200,
+    maxHeight: 800,
+    quality: 0.85,
+    format: 'image/webp',
+    estimatedSaving: 'Varies',
+  },
+};
+
 const DEFAULT_OPTIONS: OptimizeOptions = {
   maxWidth: 1200,
   maxHeight: 800,
   quality: 0.85,
   format: 'image/webp',
 };
+
+export function getPresetOptions(preset: CompressionPreset): OptimizeOptions {
+  const config = COMPRESSION_PRESETS[preset];
+  return {
+    maxWidth: config.maxWidth,
+    maxHeight: config.maxHeight,
+    quality: config.quality,
+    format: config.format,
+  };
+}
 
 export async function optimizeImage(
   imageSource: string | Blob,
