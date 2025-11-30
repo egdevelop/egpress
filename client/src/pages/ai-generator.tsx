@@ -30,18 +30,112 @@ import {
   AlertDescription,
   AlertTitle,
 } from "@/components/ui/alert";
-import { Sparkles, Key, FileText, RefreshCw, Eye, Edit, X, Check, AlertCircle } from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Sparkles, Key, FileText, RefreshCw, Eye, Edit, X, Check, AlertCircle, ChevronsUpDown, Image, Download } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
+import { cn } from "@/lib/utils";
 import type { Repository } from "@shared/schema";
 
+const LANGUAGES = [
+  { value: "english", label: "English", native: "English" },
+  { value: "indonesian", label: "Indonesian", native: "Bahasa Indonesia" },
+  { value: "spanish", label: "Spanish", native: "Español" },
+  { value: "french", label: "French", native: "Français" },
+  { value: "german", label: "German", native: "Deutsch" },
+  { value: "chinese", label: "Chinese (Simplified)", native: "简体中文" },
+  { value: "chinese-traditional", label: "Chinese (Traditional)", native: "繁體中文" },
+  { value: "japanese", label: "Japanese", native: "日本語" },
+  { value: "korean", label: "Korean", native: "한국어" },
+  { value: "arabic", label: "Arabic", native: "العربية" },
+  { value: "hindi", label: "Hindi", native: "हिन्दी" },
+  { value: "portuguese", label: "Portuguese", native: "Português" },
+  { value: "portuguese-br", label: "Portuguese (Brazil)", native: "Português (Brasil)" },
+  { value: "russian", label: "Russian", native: "Русский" },
+  { value: "italian", label: "Italian", native: "Italiano" },
+  { value: "dutch", label: "Dutch", native: "Nederlands" },
+  { value: "turkish", label: "Turkish", native: "Türkçe" },
+  { value: "vietnamese", label: "Vietnamese", native: "Tiếng Việt" },
+  { value: "thai", label: "Thai", native: "ไทย" },
+  { value: "polish", label: "Polish", native: "Polski" },
+  { value: "swedish", label: "Swedish", native: "Svenska" },
+  { value: "greek", label: "Greek", native: "Ελληνικά" },
+  { value: "hebrew", label: "Hebrew", native: "עברית" },
+  { value: "czech", label: "Czech", native: "Čeština" },
+  { value: "danish", label: "Danish", native: "Dansk" },
+  { value: "finnish", label: "Finnish", native: "Suomi" },
+  { value: "norwegian", label: "Norwegian", native: "Norsk" },
+  { value: "hungarian", label: "Hungarian", native: "Magyar" },
+  { value: "romanian", label: "Romanian", native: "Română" },
+  { value: "ukrainian", label: "Ukrainian", native: "Українська" },
+  { value: "bengali", label: "Bengali", native: "বাংলা" },
+  { value: "tamil", label: "Tamil", native: "தமிழ்" },
+  { value: "telugu", label: "Telugu", native: "తెలుగు" },
+  { value: "marathi", label: "Marathi", native: "मराठी" },
+  { value: "gujarati", label: "Gujarati", native: "ગુજરાતી" },
+  { value: "kannada", label: "Kannada", native: "ಕನ್ನಡ" },
+  { value: "malayalam", label: "Malayalam", native: "മലയാളം" },
+  { value: "punjabi", label: "Punjabi", native: "ਪੰਜਾਬੀ" },
+  { value: "urdu", label: "Urdu", native: "اردو" },
+  { value: "persian", label: "Persian", native: "فارسی" },
+  { value: "malay", label: "Malay", native: "Bahasa Melayu" },
+  { value: "tagalog", label: "Tagalog", native: "Tagalog" },
+  { value: "swahili", label: "Swahili", native: "Kiswahili" },
+  { value: "afrikaans", label: "Afrikaans", native: "Afrikaans" },
+  { value: "catalan", label: "Catalan", native: "Català" },
+  { value: "croatian", label: "Croatian", native: "Hrvatski" },
+  { value: "serbian", label: "Serbian", native: "Српски" },
+  { value: "slovak", label: "Slovak", native: "Slovenčina" },
+  { value: "slovenian", label: "Slovenian", native: "Slovenščina" },
+  { value: "bulgarian", label: "Bulgarian", native: "Български" },
+  { value: "lithuanian", label: "Lithuanian", native: "Lietuvių" },
+  { value: "latvian", label: "Latvian", native: "Latviešu" },
+  { value: "estonian", label: "Estonian", native: "Eesti" },
+  { value: "icelandic", label: "Icelandic", native: "Íslenska" },
+  { value: "irish", label: "Irish", native: "Gaeilge" },
+  { value: "welsh", label: "Welsh", native: "Cymraeg" },
+  { value: "basque", label: "Basque", native: "Euskara" },
+  { value: "galician", label: "Galician", native: "Galego" },
+  { value: "albanian", label: "Albanian", native: "Shqip" },
+  { value: "macedonian", label: "Macedonian", native: "Македонски" },
+  { value: "bosnian", label: "Bosnian", native: "Bosanski" },
+  { value: "azerbaijani", label: "Azerbaijani", native: "Azərbaycan" },
+  { value: "kazakh", label: "Kazakh", native: "Қазақша" },
+  { value: "uzbek", label: "Uzbek", native: "O'zbek" },
+  { value: "georgian", label: "Georgian", native: "ქართული" },
+  { value: "armenian", label: "Armenian", native: "Հайеreн" },
+  { value: "mongolian", label: "Mongolian", native: "Монгол" },
+  { value: "nepali", label: "Nepali", native: "नेपाली" },
+  { value: "sinhala", label: "Sinhala", native: "සිංහල" },
+  { value: "khmer", label: "Khmer", native: "ភាសាខ្មែរ" },
+  { value: "lao", label: "Lao", native: "ລາວ" },
+  { value: "burmese", label: "Burmese", native: "မြန်မာ" },
+  { value: "amharic", label: "Amharic", native: "አማርኛ" },
+  { value: "yoruba", label: "Yoruba", native: "Yorùbá" },
+  { value: "zulu", label: "Zulu", native: "isiZulu" },
+  { value: "hausa", label: "Hausa", native: "Hausa" },
+];
+
 const aiFormSchema = z.object({
-  apiKey: z.string(), // Optional - can use saved key
+  apiKey: z.string(),
   topic: z.string().min(1, "Topic is required"),
   keywords: z.string(),
   tone: z.enum(["professional", "casual", "technical", "creative"]),
   length: z.enum(["short", "medium", "long"]),
+  language: z.string().default("english"),
 });
 
 type AIFormValues = z.infer<typeof aiFormSchema>;
@@ -60,13 +154,16 @@ export default function AIGenerator() {
   const [generatedPost, setGeneratedPost] = useState<GeneratedPost | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [keySaved, setKeySaved] = useState(false);
+  const [languageOpen, setLanguageOpen] = useState(false);
+  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const { toast } = useToast();
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
   });
 
-  // Check if API key is saved (for security, the actual key is not returned)
   const { data: keyData } = useQuery<{ success: boolean; data: { hasKey: boolean } }>({
     queryKey: ["/api/ai/key"],
   });
@@ -79,17 +176,22 @@ export default function AIGenerator() {
       keywords: "",
       tone: "professional",
       length: "medium",
+      language: "english",
     },
   });
 
-  // Set keySaved status based on backend data (key is stored securely, not returned)
   useEffect(() => {
     if (keyData?.data?.hasKey) {
       setKeySaved(true);
     }
   }, [keyData?.data?.hasKey]);
 
-  // Mutation to save API key
+  useEffect(() => {
+    if (generatedPost?.heroImage) {
+      setImagePrompt(generatedPost.heroImage);
+    }
+  }, [generatedPost?.heroImage]);
+
   const saveKeyMutation = useMutation({
     mutationFn: async (apiKey: string) => {
       const response = await apiRequest("POST", "/api/ai/key", { apiKey });
@@ -107,7 +209,6 @@ export default function AIGenerator() {
     },
   });
 
-  // Mutation to clear API key
   const clearKeyMutation = useMutation({
     mutationFn: async () => {
       const response = await apiRequest("DELETE", "/api/ai/key");
@@ -130,18 +231,20 @@ export default function AIGenerator() {
     mutationFn: async (data: AIFormValues) => {
       const keywords = data.keywords.split(",").map(k => k.trim()).filter(k => k);
       const response = await apiRequest("POST", "/api/ai/generate", {
-        apiKey: data.apiKey || undefined, // If empty, backend will use saved key
-        useSavedKey: keySaved && !data.apiKey, // Tell backend to use saved key
+        apiKey: data.apiKey || undefined,
+        useSavedKey: keySaved && !data.apiKey,
         topic: data.topic,
         keywords,
         tone: data.tone,
         length: data.length,
+        language: data.language,
       });
       return response.json();
     },
     onSuccess: (data) => {
       if (data.success) {
         setGeneratedPost(data.data);
+        setGeneratedImageUrl(null);
         toast({
           title: "Content Generated",
           description: "AI has created a blog post draft for you",
@@ -158,6 +261,41 @@ export default function AIGenerator() {
       toast({
         title: "Generation Failed",
         description: "An error occurred while generating content",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const generateImageMutation = useMutation({
+    mutationFn: async (prompt: string) => {
+      setIsGeneratingImage(true);
+      const response = await apiRequest("POST", "/api/ai/generate-image", {
+        prompt,
+        useSavedKey: keySaved,
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setIsGeneratingImage(false);
+      if (data.success && data.data?.imageUrl) {
+        setGeneratedImageUrl(data.data.imageUrl);
+        toast({
+          title: "Image Generated",
+          description: "Your hero image has been created successfully",
+        });
+      } else {
+        toast({
+          title: "Image Generation Failed",
+          description: data.error || "Failed to generate image",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      setIsGeneratingImage(false);
+      toast({
+        title: "Image Generation Failed",
+        description: "An error occurred while generating the image",
         variant: "destructive",
       });
     },
@@ -209,7 +347,19 @@ export default function AIGenerator() {
     },
   });
 
+  const handleDownloadImage = () => {
+    if (generatedImageUrl) {
+      const link = document.createElement("a");
+      link.href = generatedImageUrl;
+      link.download = "hero-image.png";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
+  };
+
   const repository = repoData?.data;
+  const selectedLanguage = LANGUAGES.find(lang => lang.value === form.watch("language"));
 
   if (!repository) {
     return (
@@ -392,6 +542,76 @@ export default function AIGenerator() {
                     )}
                   />
 
+                  <FormField
+                    control={form.control}
+                    name="language"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col">
+                        <FormLabel>Language</FormLabel>
+                        <Popover open={languageOpen} onOpenChange={setLanguageOpen}>
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={languageOpen}
+                                className={cn(
+                                  "w-full justify-between",
+                                  !field.value && "text-muted-foreground"
+                                )}
+                                data-testid="select-language"
+                              >
+                                {selectedLanguage ? (
+                                  <span className="flex items-center gap-2">
+                                    <span>{selectedLanguage.label}</span>
+                                    <span className="text-muted-foreground">({selectedLanguage.native})</span>
+                                  </span>
+                                ) : (
+                                  "Select language..."
+                                )}
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[300px] p-0" align="start">
+                            <Command>
+                              <CommandInput placeholder="Search language..." data-testid="input-language-search" />
+                              <CommandList>
+                                <CommandEmpty>No language found.</CommandEmpty>
+                                <CommandGroup>
+                                  {LANGUAGES.map((language) => (
+                                    <CommandItem
+                                      key={language.value}
+                                      value={`${language.label} ${language.native}`}
+                                      onSelect={() => {
+                                        form.setValue("language", language.value);
+                                        setLanguageOpen(false);
+                                      }}
+                                      data-testid={`language-option-${language.value}`}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          field.value === language.value ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      <span className="flex-1">{language.label}</span>
+                                      <span className="text-muted-foreground text-sm">{language.native}</span>
+                                    </CommandItem>
+                                  ))}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <FormDescription>
+                          Choose the language for your generated content
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
                   <div className="grid gap-4 sm:grid-cols-2">
                     <FormField
                       control={form.control}
@@ -498,6 +718,25 @@ export default function AIGenerator() {
                     </div>
                   </div>
 
+                  <div className="flex gap-3 pt-4 border-t">
+                    <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-generated">
+                      {saveMutation.isPending ? (
+                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                      ) : (
+                        <Check className="w-4 h-4 mr-2" />
+                      )}
+                      Save as Draft
+                    </Button>
+                    <Button variant="outline" onClick={() => {
+                      setGeneratedPost(null);
+                      setGeneratedImageUrl(null);
+                      setImagePrompt("");
+                    }}>
+                      <X className="w-4 h-4 mr-2" />
+                      Discard
+                    </Button>
+                  </div>
+
                   {generatedPost.heroImage && (
                     <div className="border rounded-md p-3 bg-muted/50">
                       <p className="text-sm font-medium mb-1">Suggested Hero Image:</p>
@@ -519,21 +758,6 @@ export default function AIGenerator() {
                       </pre>
                     )}
                   </div>
-
-                  <div className="flex gap-3 pt-4 border-t">
-                    <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-generated">
-                      {saveMutation.isPending ? (
-                        <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                      ) : (
-                        <Check className="w-4 h-4 mr-2" />
-                      )}
-                      Save as Draft
-                    </Button>
-                    <Button variant="outline" onClick={() => setGeneratedPost(null)}>
-                      <X className="w-4 h-4 mr-2" />
-                      Discard
-                    </Button>
-                  </div>
                 </div>
               ) : (
                 <div className="flex items-center justify-center h-[350px]">
@@ -545,6 +769,71 @@ export default function AIGenerator() {
               )}
             </CardContent>
           </Card>
+
+          {generatedPost && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Image className="w-5 h-5" />
+                  Generate Hero Image
+                </CardTitle>
+                <CardDescription>
+                  Create an AI-generated hero image for your post
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Image Prompt</label>
+                  <Textarea
+                    placeholder="Describe the image you want to generate..."
+                    rows={3}
+                    value={imagePrompt}
+                    onChange={(e) => setImagePrompt(e.target.value)}
+                    data-testid="input-image-prompt"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Customize the prompt or use the suggested one based on your content
+                  </p>
+                </div>
+
+                <Button
+                  onClick={() => generateImageMutation.mutate(imagePrompt)}
+                  disabled={isGeneratingImage || !imagePrompt.trim()}
+                  className="w-full"
+                  data-testid="button-generate-image"
+                >
+                  {isGeneratingImage ? (
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Image className="w-4 h-4 mr-2" />
+                  )}
+                  {isGeneratingImage ? "Generating..." : "Generate Image"}
+                </Button>
+
+                {generatedImageUrl && (
+                  <div className="space-y-3">
+                    <div className="border rounded-md overflow-hidden">
+                      <img
+                        src={generatedImageUrl}
+                        alt="Generated hero image"
+                        className="w-full h-auto"
+                        data-testid="img-generated-hero"
+                      />
+                    </div>
+                    <Button
+                      variant="outline"
+                      onClick={handleDownloadImage}
+                      className="w-full"
+                      data-testid="button-download-image"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Download Image
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Alert>
             <AlertCircle className="w-4 h-4" />

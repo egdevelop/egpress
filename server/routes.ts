@@ -5,7 +5,7 @@ import multer from "multer";
 import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { VercelService } from "./vercel";
-import { generateBlogPost } from "./gemini";
+import { generateBlogPost, generateImage } from "./gemini";
 import { 
   // User-level settings (credentials shared across all repos)
   getUserSettings,
@@ -3350,7 +3350,7 @@ export async function registerRoutes(
   // AI Generate blog post
   app.post("/api/ai/generate", async (req, res) => {
     try {
-      const { topic, keywords, tone, length, apiKey, useSavedKey } = req.body;
+      const { topic, keywords, tone, length, language, apiKey, useSavedKey } = req.body;
 
       if (!topic) {
         return res.json({ success: false, error: "Topic is required" });
@@ -3368,12 +3368,45 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Gemini API key is required. Please enter a key or save one first." });
       }
 
-      const result = await generateBlogPost(keyToUse, topic, keywords || [], tone || "professional", length || "medium");
+      const result = await generateBlogPost(keyToUse, topic, keywords || [], tone || "professional", length || "medium", language || "english");
 
       res.json({ success: true, data: result });
     } catch (error: any) {
       console.error("AI generate error:", error);
       res.json({ success: false, error: error.message || "Failed to generate content" });
+    }
+  });
+
+  // AI Generate image
+  app.post("/api/ai/generate-image", async (req, res) => {
+    try {
+      const { prompt, apiKey, useSavedKey } = req.body;
+
+      if (!prompt) {
+        return res.json({ success: false, error: "Image prompt is required" });
+      }
+
+      // Determine which API key to use
+      let keyToUse = apiKey;
+      
+      if (!keyToUse && useSavedKey) {
+        // Try to get the saved key from storage
+        keyToUse = await storage.getGeminiApiKey();
+      }
+      
+      if (!keyToUse) {
+        return res.json({ success: false, error: "Gemini API key is required. Please enter a key or save one first." });
+      }
+
+      const result = await generateImage(keyToUse, prompt);
+      
+      // Return as data URL for easy display in browser
+      const dataUrl = `data:${result.mimeType};base64,${result.imageData}`;
+
+      res.json({ success: true, data: { imageUrl: dataUrl, mimeType: result.mimeType } });
+    } catch (error: any) {
+      console.error("AI image generate error:", error);
+      res.json({ success: false, error: error.message || "Failed to generate image" });
     }
   });
 

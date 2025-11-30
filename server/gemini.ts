@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Modality } from "@google/genai";
 
 export interface GeneratedPost {
   title: string;
@@ -9,12 +9,18 @@ export interface GeneratedPost {
   heroImageAlt?: string;
 }
 
+export interface GeneratedImage {
+  imageData: string; // base64 encoded image
+  mimeType: string;
+}
+
 export async function generateBlogPost(
   apiKey: string,
   topic: string,
   keywords: string[] = [],
   tone: "professional" | "casual" | "technical" | "creative" = "professional",
-  length: "short" | "medium" | "long" = "medium"
+  length: "short" | "medium" | "long" = "medium",
+  language: string = "english"
 ): Promise<GeneratedPost> {
   const ai = new GoogleGenAI({ apiKey });
 
@@ -29,7 +35,12 @@ export async function generateBlogPost(
     creative: "Use a creative and engaging storytelling approach with vivid descriptions and unique perspectives.",
   };
 
+  const languageInstruction = language !== "english" 
+    ? `IMPORTANT: Write the entire blog post in ${language} language. All content including title, description, and body must be in ${language}.`
+    : "";
+
   const prompt = `You are an expert blog content writer. Write a comprehensive, high-quality blog post about: ${topic}
+${languageInstruction}
 
 ${keywordStr}
 ${toneGuide[tone]}
@@ -98,4 +109,36 @@ Make sure the content is:
   }
 
   return JSON.parse(rawJson);
+}
+
+export async function generateImage(
+  apiKey: string,
+  prompt: string
+): Promise<GeneratedImage> {
+  const ai = new GoogleGenAI({ apiKey });
+
+  const enhancedPrompt = `Create a high-quality, professional blog hero image: ${prompt}. 
+Style: Modern, clean, visually appealing, suitable for a professional blog. 
+Aspect ratio: 16:9 landscape format.
+No text or watermarks in the image.`;
+
+  const response = await ai.models.generateContent({
+    model: "gemini-2.0-flash-exp-image-generation",
+    contents: [{ role: "user", parts: [{ text: enhancedPrompt }] }],
+    config: {
+      responseModalities: [Modality.TEXT, Modality.IMAGE],
+    },
+  });
+
+  const candidate = response.candidates?.[0];
+  const imagePart = candidate?.content?.parts?.find((part: any) => part.inlineData);
+  
+  if (!imagePart?.inlineData?.data) {
+    throw new Error("No image data in response. The model may not support image generation.");
+  }
+
+  return {
+    imageData: imagePart.inlineData.data,
+    mimeType: imagePart.inlineData.mimeType || "image/png",
+  };
 }

@@ -73,6 +73,9 @@ The system comprises a React-based frontend and an Express.js backend.
 - Fixed Gemini API key saving - key is now securely stored and can be reused without re-entering
 - Enhanced AI post generation with richer prompts, hero image suggestions, and better structured content
 - Updated project favicon to "EG" with orange theme color (#FF5D01)
+- Added multi-language support: 76 world languages with searchable dropdown using Popover + Command components
+- Implemented AI image generation using gemini-2.0-flash-exp-image-generation: separate from blog post with download capability via /api/ai/generate-image endpoint
+- Image prompt auto-fills with suggested hero image description from generated post
 
 ## External Dependencies
 
