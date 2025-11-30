@@ -767,7 +767,7 @@ export async function registerRoutes(
   });
 
   // Delete site (GitHub repo + Vercel project)
-  app.delete("/api/site", async (req, res) => {
+  app.delete("/api/site", requireAuth, async (req, res) => {
     try {
       const repo = await storage.getRepository();
       if (!repo) {
@@ -795,15 +795,54 @@ export async function registerRoutes(
       }
 
       // Delete Vercel project if linked
+      // First try memory storage, then fall back to Supabase
+      let vercelToken: string | null = null;
+      let vercelTeamId: string | undefined;
+      let vercelProjectId: string | null = null;
+      
+      // Check memory storage first
       const vercelConfig = await storage.getVercelConfig();
       const vercelProject = await storage.getVercelProject();
       
-      if (vercelConfig?.token && vercelProject?.id) {
+      if (vercelConfig?.token) {
+        vercelToken = vercelConfig.token;
+        vercelTeamId = vercelConfig.teamId;
+      }
+      
+      if (vercelProject?.id) {
+        vercelProjectId = vercelProject.id;
+      }
+      
+      // If not in memory, try Supabase
+      if (!vercelToken || !vercelProjectId) {
+        const username = req.session.githubUsername;
+        if (username) {
+          // Get Vercel token from user settings
+          const userSettings = await getUserSettings(username);
+          if (userSettings?.vercel_token && !vercelToken) {
+            vercelToken = userSettings.vercel_token;
+          }
+          
+          // Get Vercel project ID from repository settings
+          const repoSettings = await getRepositorySettings(repo.fullName);
+          if (repoSettings?.vercel_project_id && !vercelProjectId) {
+            vercelProjectId = repoSettings.vercel_project_id;
+            vercelTeamId = repoSettings.vercel_team_id || vercelTeamId;
+          }
+        }
+      }
+      
+      if (vercelToken && vercelProjectId) {
         try {
-          const vercel = new VercelService(vercelConfig.token, vercelConfig.teamId);
-          await vercel.deleteProject(vercelProject.id);
+          const vercel = new VercelService(vercelToken, vercelTeamId);
+          await vercel.deleteProject(vercelProjectId);
           results.vercelDeleted = true;
           await storage.clearVercelProject();
+          
+          // Also clear from Supabase repository settings
+          if (req.session.githubUsername) {
+            await clearRepositoryVercel(repo.fullName);
+          }
         } catch (error: any) {
           results.errors.push(`Vercel: ${error.message || "Failed to delete project"}`);
         }
