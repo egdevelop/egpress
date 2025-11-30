@@ -3350,17 +3350,25 @@ export async function registerRoutes(
   // AI Generate blog post
   app.post("/api/ai/generate", async (req, res) => {
     try {
-      const { topic, keywords, tone, length, apiKey } = req.body;
+      const { topic, keywords, tone, length, apiKey, useSavedKey } = req.body;
 
       if (!topic) {
         return res.json({ success: false, error: "Topic is required" });
       }
 
-      if (!apiKey) {
-        return res.json({ success: false, error: "Gemini API key is required" });
+      // Determine which API key to use
+      let keyToUse = apiKey;
+      
+      if (!keyToUse && useSavedKey) {
+        // Try to get the saved key from storage
+        keyToUse = await storage.getGeminiApiKey();
+      }
+      
+      if (!keyToUse) {
+        return res.json({ success: false, error: "Gemini API key is required. Please enter a key or save one first." });
       }
 
-      const result = await generateBlogPost(apiKey, topic, keywords || [], tone || "professional", length || "medium");
+      const result = await generateBlogPost(keyToUse, topic, keywords || [], tone || "professional", length || "medium");
 
       res.json({ success: true, data: result });
     } catch (error: any) {

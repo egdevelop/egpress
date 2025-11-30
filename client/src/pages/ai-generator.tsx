@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
@@ -37,7 +37,7 @@ import ReactMarkdown from "react-markdown";
 import type { Repository } from "@shared/schema";
 
 const aiFormSchema = z.object({
-  apiKey: z.string().min(1, "API key is required"),
+  apiKey: z.string(), // Optional - can use saved key
   topic: z.string().min(1, "Topic is required"),
   keywords: z.string(),
   tone: z.enum(["professional", "casual", "technical", "creative"]),
@@ -51,6 +51,8 @@ interface GeneratedPost {
   description: string;
   content: string;
   tags: string[];
+  heroImage?: string;
+  heroImageAlt?: string;
 }
 
 export default function AIGenerator() {
@@ -64,8 +66,8 @@ export default function AIGenerator() {
     queryKey: ["/api/repository"],
   });
 
-  // Load saved API key
-  const { data: keyData } = useQuery<{ success: boolean; data: { hasKey: boolean; key: string | null } }>({
+  // Check if API key is saved (for security, the actual key is not returned)
+  const { data: keyData } = useQuery<{ success: boolean; data: { hasKey: boolean } }>({
     queryKey: ["/api/ai/key"],
   });
 
@@ -80,11 +82,12 @@ export default function AIGenerator() {
     },
   });
 
-  // Populate form with saved API key when data loads
-  if (keyData?.data?.key && form.getValues("apiKey") !== keyData.data.key) {
-    form.setValue("apiKey", keyData.data.key);
-    if (!keySaved) setKeySaved(true);
-  }
+  // Set keySaved status based on backend data (key is stored securely, not returned)
+  useEffect(() => {
+    if (keyData?.data?.hasKey) {
+      setKeySaved(true);
+    }
+  }, [keyData?.data?.hasKey]);
 
   // Mutation to save API key
   const saveKeyMutation = useMutation({
@@ -127,7 +130,8 @@ export default function AIGenerator() {
     mutationFn: async (data: AIFormValues) => {
       const keywords = data.keywords.split(",").map(k => k.trim()).filter(k => k);
       const response = await apiRequest("POST", "/api/ai/generate", {
-        apiKey: data.apiKey,
+        apiKey: data.apiKey || undefined, // If empty, backend will use saved key
+        useSavedKey: keySaved && !data.apiKey, // Tell backend to use saved key
         topic: data.topic,
         keywords,
         tone: data.tone,
@@ -252,54 +256,61 @@ export default function AIGenerator() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {keySaved ? (
+                    <Alert className="border-green-500/50 bg-green-50 dark:bg-green-950/20">
+                      <Check className="w-4 h-4 text-green-600" />
+                      <AlertTitle className="text-green-700 dark:text-green-400">API Key Saved</AlertTitle>
+                      <AlertDescription className="text-green-600 dark:text-green-500">
+                        Your Gemini API key is securely saved. You can generate content without re-entering it.
+                      </AlertDescription>
+                    </Alert>
+                  ) : null}
                   <FormField
                     control={form.control}
                     name="apiKey"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel>Gemini API Key</FormLabel>
+                        <FormLabel>{keySaved ? "New API Key (optional)" : "Gemini API Key"}</FormLabel>
                         <FormControl>
                           <Input
                             type="password"
-                            placeholder="AIzaSy..."
+                            placeholder={keySaved ? "Leave empty to use saved key" : "AIzaSy..."}
                             {...field}
                             data-testid="input-gemini-api-key"
                           />
                         </FormControl>
                         <FormDescription>
-                          Get your API key from{" "}
-                          <a 
-                            href="https://aistudio.google.com/app/apikey" 
-                            target="_blank" 
-                            rel="noopener noreferrer"
-                            className="text-primary underline"
-                          >
-                            Google AI Studio
-                          </a>
+                          {keySaved 
+                            ? "Enter a new key to override the saved one, or leave empty to use saved key."
+                            : <>Get your API key from{" "}
+                              <a 
+                                href="https://aistudio.google.com/app/apikey" 
+                                target="_blank" 
+                                rel="noopener noreferrer"
+                                className="text-primary underline"
+                              >
+                                Google AI Studio
+                              </a>
+                            </>
+                          }
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     {keySaved ? (
-                      <>
-                        <Badge variant="secondary" className="gap-1">
-                          <Check className="w-3 h-3" />
-                          Key Saved
-                        </Badge>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => clearKeyMutation.mutate()}
-                          disabled={clearKeyMutation.isPending}
-                          data-testid="button-clear-key"
-                        >
-                          <X className="w-4 h-4 mr-1" />
-                          Clear
-                        </Button>
-                      </>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => clearKeyMutation.mutate()}
+                        disabled={clearKeyMutation.isPending}
+                        data-testid="button-clear-key"
+                      >
+                        <X className="w-4 h-4 mr-1" />
+                        {clearKeyMutation.isPending ? "Clearing..." : "Clear Saved Key"}
+                      </Button>
                     ) : (
                       <Button
                         type="button"
@@ -486,6 +497,16 @@ export default function AIGenerator() {
                       ))}
                     </div>
                   </div>
+
+                  {generatedPost.heroImage && (
+                    <div className="border rounded-md p-3 bg-muted/50">
+                      <p className="text-sm font-medium mb-1">Suggested Hero Image:</p>
+                      <p className="text-sm text-muted-foreground">{generatedPost.heroImage}</p>
+                      {generatedPost.heroImageAlt && (
+                        <p className="text-xs text-muted-foreground mt-1">Alt: {generatedPost.heroImageAlt}</p>
+                      )}
+                    </div>
+                  )}
                   
                   <div className="border-t pt-4">
                     {showPreview ? (
