@@ -304,25 +304,27 @@ export function AppSidebar() {
             }}>
               <PopoverTrigger asChild>
                 <button
-                  className="flex items-center gap-2 p-2 rounded-md bg-sidebar-accent/50 w-full text-left hover-elevate cursor-pointer"
+                  className="flex items-center gap-3 p-3 rounded-md border-2 border-primary/50 bg-primary/10 w-full text-left hover-elevate cursor-pointer transition-all"
                   data-testid="button-repo-manage"
                 >
-                  <Github className="w-4 h-4 text-muted-foreground" />
+                  <div className="w-8 h-8 rounded-md bg-primary/20 flex items-center justify-center shrink-0">
+                    <Github className="w-4 h-4 text-primary" />
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium truncate" data-testid="text-repo-name">
-                      {repository.fullName}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      {repository.defaultBranch}
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm font-semibold truncate" data-testid="text-repo-name">
+                        {repository.fullName.split('/')[1]}
+                      </p>
+                      <div className="w-2 h-2 rounded-full bg-green-500 shrink-0" title="Connected" />
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {repository.fullName.split('/')[0]} / {repository.defaultBranch}
                     </p>
                   </div>
-                  <Badge variant="outline" className="shrink-0">
-                    <Check className="w-3 h-3 mr-1" />
-                    <span className="text-xs">Connected</span>
-                  </Badge>
+                  <ChevronsUpDown className="w-4 h-4 text-muted-foreground shrink-0" />
                 </button>
               </PopoverTrigger>
-              <PopoverContent className="w-[280px] p-0" align="start" side="bottom">
+              <PopoverContent className="w-[300px] p-0" align="start" side="bottom">
                 {showChangeRepo ? (
                   <Command>
                     <CommandInput 
@@ -341,32 +343,42 @@ export function AppSidebar() {
                           "No repository found."
                         )}
                       </CommandEmpty>
-                      <CommandGroup>
-                        <ScrollArea className="h-48">
+                      <CommandGroup heading="Your Repositories">
+                        <ScrollArea className="h-56">
                           {filteredRepos.map((repo) => {
                             const isConnecting = connectingRepoId === repo.id;
+                            const isCurrentRepo = repository?.fullName === repo.fullName;
                             return (
                               <CommandItem
                                 key={repo.id}
                                 value={repo.fullName}
-                                onSelect={() => handleSelectRepo(repo)}
-                                className="cursor-pointer"
-                                disabled={connectMutation.isPending}
+                                onSelect={() => !isCurrentRepo && handleSelectRepo(repo)}
+                                className={`cursor-pointer relative ${isCurrentRepo ? 'bg-primary/10' : ''}`}
+                                disabled={connectMutation.isPending || isCurrentRepo}
                                 data-testid={`repo-change-option-${repo.name}`}
                               >
                                 <div className="flex items-center gap-2 flex-1 min-w-0">
                                   {isConnecting ? (
                                     <RefreshCw className="w-4 h-4 shrink-0 animate-spin text-primary" />
+                                  ) : isCurrentRepo ? (
+                                    <Check className="w-4 h-4 shrink-0 text-primary" />
                                   ) : (
                                     <Github className="w-4 h-4 shrink-0" />
                                   )}
                                   <div className="min-w-0 flex-1">
                                     <div className="flex items-center gap-1">
-                                      <span className="text-sm font-medium truncate">{repo.name}</span>
+                                      <span className={`text-sm font-medium truncate ${isCurrentRepo ? 'text-primary' : ''}`}>
+                                        {repo.name}
+                                      </span>
                                       {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
+                                      {isCurrentRepo && (
+                                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">
+                                          Active
+                                        </Badge>
+                                      )}
                                     </div>
                                     <p className="text-xs text-muted-foreground truncate">
-                                      {isConnecting ? "Connecting..." : repo.owner}
+                                      {isConnecting ? "Connecting & linking Vercel..." : repo.owner}
                                     </p>
                                   </div>
                                 </div>
@@ -378,17 +390,24 @@ export function AppSidebar() {
                     </CommandList>
                   </Command>
                 ) : (
-                  <div className="p-1">
+                  <div className="p-2 space-y-1">
+                    <div className="px-2 py-1.5 mb-2">
+                      <p className="text-xs font-medium text-muted-foreground">Current Repository</p>
+                      <p className="text-sm font-semibold truncate">{repository.fullName}</p>
+                    </div>
                     <button
-                      className="flex items-center gap-2 w-full p-2 text-sm rounded-md hover-elevate"
+                      className="flex items-center gap-3 w-full p-2.5 text-sm rounded-md hover-elevate"
                       onClick={() => setShowChangeRepo(true)}
                       data-testid="button-change-repo"
                     >
-                      <ArrowRightLeft className="w-4 h-4" />
-                      Change Repository
+                      <ArrowRightLeft className="w-4 h-4 text-muted-foreground" />
+                      <div className="text-left">
+                        <p className="font-medium">Switch Repository</p>
+                        <p className="text-xs text-muted-foreground">Connect to a different repo</p>
+                      </div>
                     </button>
                     <button
-                      className="flex items-center gap-2 w-full p-2 text-sm rounded-md hover-elevate text-destructive"
+                      className="flex items-center gap-3 w-full p-2.5 text-sm rounded-md hover-elevate text-destructive"
                       onClick={() => {
                         setRepoManageOpen(false);
                         setDisconnectDialogOpen(true);
@@ -396,7 +415,10 @@ export function AppSidebar() {
                       data-testid="button-disconnect-repo"
                     >
                       <Unplug className="w-4 h-4" />
-                      Disconnect
+                      <div className="text-left">
+                        <p className="font-medium">Disconnect</p>
+                        <p className="text-xs text-muted-foreground/70">Remove this connection</p>
+                      </div>
                     </button>
                   </div>
                 )}
@@ -440,25 +462,23 @@ export function AppSidebar() {
           </div>
         ) : (
           <div className="space-y-2">
-            <div className="flex items-center gap-2">
-              <Github className="w-4 h-4 text-muted-foreground shrink-0" />
-              <span className="text-xs text-muted-foreground">Connect Repository</span>
-            </div>
-            
             <Popover open={repoSelectOpen} onOpenChange={setRepoSelectOpen}>
               <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  role="combobox"
-                  aria-expanded={repoSelectOpen}
-                  className="w-full justify-between h-9 text-sm"
+                <button
+                  className="flex items-center gap-3 p-3 rounded-md border-2 border-dashed border-muted-foreground/30 w-full text-left hover-elevate cursor-pointer transition-all hover:border-primary/50"
                   data-testid="button-select-repo"
                 >
-                  <span className="text-muted-foreground truncate">Select repository...</span>
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
+                  <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">
+                    <Github className="w-4 h-4 text-muted-foreground" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">Connect Repository</p>
+                    <p className="text-xs text-muted-foreground">Select a GitHub repo to manage</p>
+                  </div>
+                  <ChevronsUpDown className="w-4 h-4 text-muted-foreground shrink-0" />
+                </button>
               </PopoverTrigger>
-              <PopoverContent className="w-[280px] p-0" align="start" side="bottom">
+              <PopoverContent className="w-[300px] p-0" align="start" side="bottom">
                 <Command>
                   <CommandInput 
                     placeholder="Search repositories..." 
@@ -470,14 +490,14 @@ export function AppSidebar() {
                       {reposLoading ? (
                         <div className="flex items-center justify-center py-4">
                           <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                          Loading...
+                          Loading repositories...
                         </div>
                       ) : (
                         "No repository found."
                       )}
                     </CommandEmpty>
-                    <CommandGroup>
-                      <ScrollArea className="h-48">
+                    <CommandGroup heading="Your Repositories">
+                      <ScrollArea className="h-56">
                         {filteredRepos.map((repo) => {
                           const isConnecting = connectingRepoId === repo.id;
                           return (
@@ -501,7 +521,7 @@ export function AppSidebar() {
                                     {repo.isPrivate && <Lock className="w-3 h-3 text-muted-foreground" />}
                                   </div>
                                   <p className="text-xs text-muted-foreground truncate">
-                                    {isConnecting ? "Connecting..." : repo.owner}
+                                    {isConnecting ? "Connecting & linking Vercel..." : repo.owner}
                                   </p>
                                 </div>
                               </div>
