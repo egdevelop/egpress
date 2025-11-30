@@ -145,6 +145,7 @@ interface GeneratedPost {
   description: string;
   content: string;
   tags: string[];
+  category?: string;
   heroImage?: string;
   heroImageAlt?: string;
 }

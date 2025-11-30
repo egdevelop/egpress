@@ -5,6 +5,7 @@ export interface GeneratedPost {
   description: string;
   content: string;
   tags: string[];
+  category?: string;
   heroImage?: string;
   heroImageAlt?: string;
 }
@@ -74,7 +75,8 @@ Return the response in JSON format with these fields:
   * Bold and italic text for emphasis
   * Block quotes for important callouts
 - tags: An array of 4-6 relevant tags (lowercase, hyphenated)
-- heroImage: A suggested image description for the hero image (e.g., "A developer working on a laptop with code on screen")
+- category: A single category for the post (e.g., "Technology", "Tutorial", "News", "Lifestyle", "Business", "Development")
+- heroImage: A detailed image description for AI image generation (e.g., "Modern workspace with laptop showing code editor, coffee cup, and plants on wooden desk with soft natural lighting")
 - heroImageAlt: Alt text for the hero image for accessibility
 
 Make sure the content is:
@@ -96,10 +98,11 @@ Make sure the content is:
             description: { type: "string" },
             content: { type: "string" },
             tags: { type: "array", items: { type: "string" } },
+            category: { type: "string" },
             heroImage: { type: "string" },
             heroImageAlt: { type: "string" },
           },
-          required: ["title", "description", "content", "tags"],
+          required: ["title", "description", "content", "tags", "category"],
         },
       },
     });
