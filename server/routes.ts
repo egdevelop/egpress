@@ -765,6 +765,70 @@ export async function registerRoutes(
     }
   });
 
+  // Delete site (GitHub repo + Vercel project)
+  app.delete("/api/site", async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const results = {
+        githubDeleted: false,
+        vercelDeleted: false,
+        errors: [] as string[],
+      };
+
+      // Delete GitHub repository
+      try {
+        const octokit = await getGitHubClient();
+        if (octokit) {
+          await octokit.repos.delete({
+            owner: repo.owner,
+            repo: repo.name,
+          });
+          results.githubDeleted = true;
+        }
+      } catch (error: any) {
+        results.errors.push(`GitHub: ${error.message || "Failed to delete repository"}`);
+      }
+
+      // Delete Vercel project if linked
+      const vercelConfig = await storage.getVercelConfig();
+      const vercelProject = await storage.getVercelProject();
+      
+      if (vercelConfig?.token && vercelProject?.id) {
+        try {
+          const vercel = new VercelService(vercelConfig.token, vercelConfig.teamId);
+          await vercel.deleteProject(vercelProject.id);
+          results.vercelDeleted = true;
+          await storage.clearVercelProject();
+        } catch (error: any) {
+          results.errors.push(`Vercel: ${error.message || "Failed to delete project"}`);
+        }
+      }
+
+      // Clear local repository connection
+      await storage.clearRepository();
+
+      if (results.githubDeleted || results.vercelDeleted) {
+        res.json({ 
+          success: true, 
+          data: results,
+          message: `Deleted: ${results.githubDeleted ? "GitHub repo" : ""}${results.githubDeleted && results.vercelDeleted ? " and " : ""}${results.vercelDeleted ? "Vercel project" : ""}`
+        });
+      } else {
+        res.json({ 
+          success: false, 
+          error: results.errors.join("; ") || "Failed to delete site",
+          data: results 
+        });
+      }
+    } catch (error: any) {
+      res.json({ success: false, error: error.message || "Failed to delete site" });
+    }
+  });
+
   // Sync repository data
   app.post("/api/repository/sync", async (req, res) => {
     try {

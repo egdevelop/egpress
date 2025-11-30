@@ -30,6 +30,15 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { 
   Settings as SettingsIcon, 
   Github, 
@@ -45,8 +54,11 @@ import {
   Key,
   LogOut,
   Eye,
-  EyeOff
+  EyeOff,
+  Trash2,
+  AlertTriangle
 } from "lucide-react";
+import { SiVercel } from "react-icons/si";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Repository, GitHubRepo } from "@shared/schema";
@@ -63,6 +75,8 @@ export default function Settings() {
   const [repoSearch, setRepoSearch] = useState("");
   const [githubToken, setGithubToken] = useState("");
   const [showToken, setShowToken] = useState(false);
+  const [deleteSiteOpen, setDeleteSiteOpen] = useState(false);
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
   const { toast } = useToast();
 
   const { data: repoData, isLoading: repoLoading } = useQuery<{ success: boolean; data: Repository | null }>({
@@ -188,6 +202,37 @@ export default function Settings() {
       queryClient.invalidateQueries({ queryKey: ["/api/github/status"] });
       queryClient.invalidateQueries({ queryKey: ["/api/github/user"] });
       queryClient.invalidateQueries({ queryKey: ["/api/github/repos"] });
+    },
+  });
+
+  const deleteSiteMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("DELETE", "/api/site");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      setDeleteSiteOpen(false);
+      setDeleteConfirmText("");
+      if (data.success) {
+        toast({
+          title: "Site Deleted",
+          description: data.message || "Site has been permanently deleted",
+        });
+        queryClient.invalidateQueries();
+      } else {
+        toast({
+          title: "Partial Deletion",
+          description: data.error || "Some items could not be deleted",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete site",
+        variant: "destructive",
+      });
     },
   });
 
@@ -607,6 +652,119 @@ export default function Settings() {
                 </div>
               </div>
             )}
+          </CardContent>
+        </Card>
+      )}
+
+      {repository && (
+        <Card className="border-destructive/50">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="w-5 h-5" />
+              Danger Zone
+            </CardTitle>
+            <CardDescription>
+              Irreversible actions that will permanently delete your site
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="p-4 rounded-lg border border-destructive/30 bg-destructive/5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <p className="font-medium">Delete Site</p>
+                  <p className="text-sm text-muted-foreground">
+                    Permanently delete the GitHub repository and linked Vercel project. 
+                    This action cannot be undone.
+                  </p>
+                </div>
+                <Dialog open={deleteSiteOpen} onOpenChange={setDeleteSiteOpen}>
+                  <DialogTrigger asChild>
+                    <Button 
+                      variant="destructive" 
+                      data-testid="button-delete-site"
+                    >
+                      <Trash2 className="w-4 h-4 mr-2" />
+                      Delete Site
+                    </Button>
+                  </DialogTrigger>
+                  <DialogContent>
+                    <DialogHeader>
+                      <DialogTitle className="flex items-center gap-2 text-destructive">
+                        <AlertTriangle className="w-5 h-5" />
+                        Delete Site Permanently
+                      </DialogTitle>
+                      <DialogDescription className="pt-2">
+                        This will permanently delete the following:
+                      </DialogDescription>
+                    </DialogHeader>
+                    
+                    <div className="space-y-3 py-4">
+                      <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/50">
+                        <Github className="w-5 h-5" />
+                        <div>
+                          <p className="font-medium">{repository.fullName}</p>
+                          <p className="text-xs text-muted-foreground">GitHub Repository</p>
+                        </div>
+                      </div>
+                      
+                      <div className="flex items-center gap-3 p-3 rounded-lg border bg-muted/50">
+                        <SiVercel className="w-5 h-5" />
+                        <div>
+                          <p className="font-medium">Linked Vercel Project</p>
+                          <p className="text-xs text-muted-foreground">If connected</p>
+                        </div>
+                      </div>
+                      
+                      <div className="p-3 rounded-lg border border-destructive/50 bg-destructive/5">
+                        <p className="text-sm font-medium text-destructive mb-2">
+                          This action is irreversible!
+                        </p>
+                        <p className="text-sm text-muted-foreground mb-3">
+                          Type <strong className="text-foreground">{repository.name}</strong> to confirm:
+                        </p>
+                        <Input
+                          placeholder={repository.name}
+                          value={deleteConfirmText}
+                          onChange={(e) => setDeleteConfirmText(e.target.value)}
+                          className="border-destructive/50"
+                          data-testid="input-confirm-delete"
+                        />
+                      </div>
+                    </div>
+                    
+                    <DialogFooter>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => {
+                          setDeleteSiteOpen(false);
+                          setDeleteConfirmText("");
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        onClick={() => deleteSiteMutation.mutate()}
+                        disabled={deleteConfirmText !== repository.name || deleteSiteMutation.isPending}
+                        data-testid="button-confirm-delete-site"
+                      >
+                        {deleteSiteMutation.isPending ? (
+                          <>
+                            <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                            Deleting...
+                          </>
+                        ) : (
+                          <>
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete Site
+                          </>
+                        )}
+                      </Button>
+                    </DialogFooter>
+                  </DialogContent>
+                </Dialog>
+              </div>
+            </div>
           </CardContent>
         </Card>
       )}

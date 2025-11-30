@@ -588,6 +588,13 @@ export class VercelService {
     );
   }
 
+  async deleteProject(projectId: string): Promise<void> {
+    await this.request(
+      `/v9/projects/${encodeURIComponent(projectId)}`,
+      { method: "DELETE" }
+    );
+  }
+
   async verifyDomain(projectId: string, domain: string): Promise<VercelDomain> {
     const d = await this.request<any>(
       `/v9/projects/${encodeURIComponent(projectId)}/domains/${encodeURIComponent(domain)}/verify`,
