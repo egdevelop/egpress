@@ -84,7 +84,7 @@ Make sure the content is:
 - Free of fluff and filler content`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.5-pro",
+    model: "gemini-3-pro-preview",
     contents: prompt,
     config: {
       responseMimeType: "application/json",
@@ -123,7 +123,7 @@ Aspect ratio: 16:9 landscape format.
 No text or watermarks in the image.`;
 
   const response = await ai.models.generateContent({
-    model: "gemini-2.0-flash-exp-image-generation",
+    model: "gemini-3-pro-image-preview",
     contents: [{ role: "user", parts: [{ text: enhancedPrompt }] }],
     config: {
       responseModalities: [Modality.TEXT, Modality.IMAGE],
