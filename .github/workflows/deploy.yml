@@ -25,6 +25,6 @@ jobs:
           ssh -p 2104 -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST << 'EOF'
             cd /app/egpress
             git pull origin main
-            npm install --production
+            npm install -y
             pm2 restart 0
           EOF
