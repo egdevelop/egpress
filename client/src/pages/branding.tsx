@@ -12,6 +12,13 @@ import { Switch } from "@/components/ui/switch";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Form,
   FormControl,
   FormDescription,
@@ -20,6 +27,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { ImageUpload } from "@/components/image-upload";
 import { 
   Palette, 
   Globe, 
@@ -31,14 +39,12 @@ import {
   Mail,
   Settings2,
   Share2,
-  FileText,
-  AlertCircle
+  Image as ImageIcon
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Repository } from "@shared/schema";
 
-// Legacy branding form schema (for old templates with Header.astro/Footer.astro)
 const legacyBrandingFormSchema = z.object({
   siteName: z.string().min(1, "Site name is required"),
   logoLetter: z.string().max(2, "Max 2 characters"),
@@ -50,36 +56,58 @@ const legacyBrandingFormSchema = z.object({
   }),
 });
 
-// New template branding form schema (for egpress-v1 with siteSettings.ts)
 const newBrandingFormSchema = z.object({
   siteName: z.string().min(1, "Site name is required"),
+  siteTagline: z.string(),
   siteDescription: z.string(),
   siteUrl: z.string().url("Must be a valid URL").or(z.string().length(0)),
   logo: z.object({
     text: z.string(),
-    icon: z.string().optional(),
+    showIcon: z.boolean(),
+    iconText: z.string(),
   }),
   seo: z.object({
-    title: z.string(),
-    description: z.string(),
-    ogImage: z.string().optional(),
-    twitterHandle: z.string().optional(),
+    defaultTitle: z.string(),
+    titleTemplate: z.string(),
+    defaultDescription: z.string(),
+    defaultImage: z.string(),
+    keywords: z.string(),
+    language: z.string(),
+    locale: z.string(),
+    themeColor: z.string(),
+    robots: z.string(),
+    twitterHandle: z.string(),
+    twitterCardType: z.enum(['summary', 'summary_large_image', 'app', 'player']),
+    facebookAppId: z.string(),
+    googleSiteVerification: z.string(),
+    bingSiteVerification: z.string(),
+    googleAnalyticsId: z.string(),
+    author: z.string(),
+    publisher: z.string(),
+    copyrightYear: z.string(),
   }),
   social: z.object({
-    github: z.string().optional(),
-    twitter: z.string().optional(),
-    facebook: z.string().optional(),
-    instagram: z.string().optional(),
+    twitter: z.string(),
+    linkedin: z.string(),
+    facebook: z.string(),
+    instagram: z.string(),
+    github: z.string(),
+    youtube: z.string(),
   }),
   contact: z.object({
     email: z.string().email().or(z.string().length(0)),
-    address: z.string().optional(),
+    phone: z.string(),
+    address: z.string(),
   }),
   features: z.object({
     enableSearch: z.boolean(),
-    showTags: z.boolean(),
-    enableRSS: z.boolean(),
-    enableSitemap: z.boolean(),
+    enableCategories: z.boolean(),
+    enableTags: z.boolean(),
+    enableComments: z.boolean(),
+    enableNewsletter: z.boolean(),
+    enableRss: z.boolean(),
+    postsPerPage: z.number().min(1).max(100),
+    relatedPostsCount: z.number().min(0).max(20),
   }),
 });
 
@@ -101,13 +129,12 @@ interface LegacyBrandingData {
 
 export default function Branding() {
   const { toast } = useToast();
-  const [activeTab, setActiveTab] = useState("identity");
+  const [activeTab, setActiveTab] = useState("general");
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
   });
 
-  // Detect template type
   const { data: templateTypeData } = useQuery<{ success: boolean; templateType: string; configFile: string | null }>({
     queryKey: ["/api/template-type"],
     enabled: !!repoData?.data,
@@ -116,7 +143,6 @@ export default function Branding() {
   const templateType = templateTypeData?.templateType || "unknown";
   const isNewTemplate = templateType === "egpress-v1";
 
-  // Fetch site settings for new template
   const { data: siteSettingsData, isLoading: siteSettingsLoading } = useQuery<{ 
     success: boolean; 
     data?: { siteSettings?: Record<string, any> };
@@ -126,7 +152,6 @@ export default function Branding() {
     enabled: !!repoData?.data && isNewTemplate,
   });
 
-  // Fetch legacy branding data
   const { data: legacyBrandingData, isLoading: legacyLoading } = useQuery<{ success: boolean; data: LegacyBrandingData | null }>({
     queryKey: ["/api/branding"],
     enabled: !!repoData?.data && !isNewTemplate,
@@ -134,7 +159,6 @@ export default function Branding() {
 
   const isLoading = isNewTemplate ? siteSettingsLoading : legacyLoading;
 
-  // Legacy form
   const legacyForm = useForm<LegacyBrandingFormValues>({
     resolver: zodResolver(legacyBrandingFormSchema),
     defaultValues: {
@@ -149,22 +173,49 @@ export default function Branding() {
     },
   });
 
-  // New template form
   const newForm = useForm<NewBrandingFormValues>({
     resolver: zodResolver(newBrandingFormSchema),
     defaultValues: {
       siteName: "",
+      siteTagline: "",
       siteDescription: "",
       siteUrl: "",
-      logo: { text: "", icon: "" },
-      seo: { title: "", description: "", ogImage: "", twitterHandle: "" },
-      social: { github: "", twitter: "", facebook: "", instagram: "" },
-      contact: { email: "", address: "" },
-      features: { enableSearch: true, showTags: true, enableRSS: true, enableSitemap: true },
+      logo: { text: "", showIcon: false, iconText: "" },
+      seo: { 
+        defaultTitle: "", 
+        titleTemplate: "%s | Site Name",
+        defaultDescription: "", 
+        defaultImage: "", 
+        keywords: "",
+        language: "en",
+        locale: "en_US",
+        themeColor: "#000000",
+        robots: "index, follow",
+        twitterHandle: "",
+        twitterCardType: "summary_large_image",
+        facebookAppId: "",
+        googleSiteVerification: "",
+        bingSiteVerification: "",
+        googleAnalyticsId: "",
+        author: "",
+        publisher: "",
+        copyrightYear: new Date().getFullYear().toString(),
+      },
+      social: { twitter: "", linkedin: "", facebook: "", instagram: "", github: "", youtube: "" },
+      contact: { email: "", phone: "", address: "" },
+      features: { 
+        enableSearch: true, 
+        enableCategories: true,
+        enableTags: true, 
+        enableComments: false,
+        enableNewsletter: false,
+        enableRss: true,
+        postsPerPage: 10,
+        relatedPostsCount: 3,
+      },
     },
   });
 
-  // Update legacy form when data loads
   useEffect(() => {
     if (legacyBrandingData?.data && !isNewTemplate) {
       legacyForm.reset({
@@ -180,45 +231,67 @@ export default function Branding() {
     }
   }, [legacyBrandingData, legacyForm, isNewTemplate]);
 
-  // Update new form when data loads
   useEffect(() => {
     if (siteSettingsData?.data?.siteSettings && isNewTemplate) {
       const s = siteSettingsData.data.siteSettings;
+      const keywords = Array.isArray(s.seo?.keywords) ? s.seo.keywords.join(", ") : (s.seo?.keywords || "");
       newForm.reset({
         siteName: s.siteName || "",
+        siteTagline: s.siteTagline || "",
         siteDescription: s.siteDescription || "",
         siteUrl: s.siteUrl || "",
         logo: { 
-          text: s.logo?.text || s.text || "", 
-          icon: s.logo?.icon || s.icon || "" 
+          text: s.logo?.text || "", 
+          showIcon: s.logo?.showIcon ?? false,
+          iconText: s.logo?.iconText || "",
         },
         seo: {
-          title: s.seo?.defaultTitle || s.seo?.title || "",
-          description: s.seo?.defaultDescription || s.seo?.description || "",
-          ogImage: s.seo?.defaultImage || s.seo?.ogImage || "",
+          defaultTitle: s.seo?.defaultTitle || "",
+          titleTemplate: s.seo?.titleTemplate || "%s | Site Name",
+          defaultDescription: s.seo?.defaultDescription || "",
+          defaultImage: s.seo?.defaultImage || "",
+          keywords: keywords,
+          language: s.seo?.language || "en",
+          locale: s.seo?.locale || "en_US",
+          themeColor: s.seo?.themeColor || "#000000",
+          robots: s.seo?.robots || "index, follow",
           twitterHandle: s.seo?.twitterHandle || "",
+          twitterCardType: s.seo?.twitterCardType || "summary_large_image",
+          facebookAppId: s.seo?.facebookAppId || "",
+          googleSiteVerification: s.seo?.googleSiteVerification || "",
+          bingSiteVerification: s.seo?.bingSiteVerification || "",
+          googleAnalyticsId: s.seo?.googleAnalyticsId || "",
+          author: s.seo?.author || "",
+          publisher: s.seo?.publisher || "",
+          copyrightYear: s.seo?.copyrightYear || new Date().getFullYear().toString(),
         },
         social: {
-          github: s.social?.github || "",
           twitter: s.social?.twitter || "",
+          linkedin: s.social?.linkedin || "",
           facebook: s.social?.facebook || "",
           instagram: s.social?.instagram || "",
+          github: s.social?.github || "",
+          youtube: s.social?.youtube || "",
         },
         contact: {
           email: s.contact?.email || "",
+          phone: s.contact?.phone || "",
           address: s.contact?.address || "",
         },
         features: {
           enableSearch: s.features?.enableSearch ?? true,
-          showTags: s.features?.showTags ?? true,
-          enableRSS: s.features?.enableRSS ?? true,
-          enableSitemap: s.features?.enableSitemap ?? true,
+          enableCategories: s.features?.enableCategories ?? true,
+          enableTags: s.features?.enableTags ?? true,
+          enableComments: s.features?.enableComments ?? false,
+          enableNewsletter: s.features?.enableNewsletter ?? false,
+          enableRss: s.features?.enableRss ?? true,
+          postsPerPage: s.features?.postsPerPage ?? 10,
+          relatedPostsCount: s.features?.relatedPostsCount ?? 3,
         },
       });
     }
   }, [siteSettingsData, newForm, isNewTemplate]);
 
-  // Legacy save mutation
   const saveLegacyMutation = useMutation({
     mutationFn: async (data: LegacyBrandingFormValues) => {
       const response = await apiRequest("PUT", "/api/branding", data);
@@ -248,18 +321,21 @@ export default function Branding() {
     },
   });
 
-  // New template save mutation
   const saveNewMutation = useMutation({
     mutationFn: async (data: NewBrandingFormValues) => {
+      const keywordsArray = data.seo.keywords
+        .split(",")
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+      
       const transformedData = {
         ...data,
         seo: {
-          defaultTitle: data.seo.title,
-          defaultDescription: data.seo.description,
-          defaultImage: data.seo.ogImage,
-          twitterHandle: data.seo.twitterHandle,
+          ...data.seo,
+          keywords: keywordsArray,
         },
       };
+      
       const response = await apiRequest("PUT", "/api/site-settings", {
         siteSettings: transformedData,
         commitMessage: "Update site branding and settings",
@@ -298,7 +374,7 @@ export default function Branding() {
         <Card className="p-8">
           <div className="text-center">
             <Palette className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-            <h2 className="text-lg font-medium mb-2">No Repository Connected</h2>
+            <h2 className="text-lg font-medium mb-2" data-testid="text-no-repo">No Repository Connected</h2>
             <p className="text-muted-foreground">
               Connect a repository to configure branding.
             </p>
@@ -311,24 +387,23 @@ export default function Branding() {
   if (isLoading) {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-6">
-        <Skeleton className="h-10 w-48" />
-        <Skeleton className="h-64 w-full" />
+        <Skeleton className="h-10 w-48" data-testid="skeleton-title" />
+        <Skeleton className="h-64 w-full" data-testid="skeleton-content" />
       </div>
     );
   }
 
-  // New template UI
   if (isNewTemplate) {
     return (
       <div className="p-6 max-w-4xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-3xl font-semibold">Site Settings</h1>
-            <div className="flex items-center gap-2 mt-1">
+            <h1 className="text-3xl font-semibold" data-testid="text-page-title">Site Settings</h1>
+            <div className="flex items-center gap-2 mt-1 flex-wrap">
               <p className="text-muted-foreground">
                 Configure siteSettings.ts for your blog
               </p>
-              <Badge variant="secondary" className="text-xs">egpress-v1</Badge>
+              <Badge variant="secondary" className="text-xs" data-testid="badge-template-type">egpress-v1</Badge>
             </div>
           </div>
           <Button
@@ -348,10 +423,14 @@ export default function Branding() {
         <Form {...newForm}>
           <form className="space-y-6">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-5">
-                <TabsTrigger value="identity" data-testid="tab-identity">
+              <TabsList className="grid w-full grid-cols-6">
+                <TabsTrigger value="general" data-testid="tab-general">
                   <Globe className="w-4 h-4 mr-2" />
-                  Identity
+                  General
+                </TabsTrigger>
+                <TabsTrigger value="logo" data-testid="tab-logo">
+                  <ImageIcon className="w-4 h-4 mr-2" />
+                  Logo
                 </TabsTrigger>
                 <TabsTrigger value="seo" data-testid="tab-seo">
                   <Search className="w-4 h-4 mr-2" />
@@ -371,10 +450,10 @@ export default function Branding() {
                 </TabsTrigger>
               </TabsList>
 
-              <TabsContent value="identity" className="mt-6 space-y-6">
+              <TabsContent value="general" className="mt-6 space-y-6">
                 <Card>
                   <CardHeader>
-                    <CardTitle>Site Identity</CardTitle>
+                    <CardTitle>General Settings</CardTitle>
                     <CardDescription>
                       Basic information about your site
                     </CardDescription>
@@ -397,6 +476,26 @@ export default function Branding() {
                             The name of your site, shown in header and metadata
                           </FormDescription>
                           <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="siteTagline"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Site Tagline</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="A blog about technology and innovation"
+                              {...field}
+                              data-testid="input-site-tagline"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            A short tagline or slogan for your site
+                          </FormDescription>
                         </FormItem>
                       )}
                     />
@@ -442,48 +541,81 @@ export default function Branding() {
                         </FormItem>
                       )}
                     />
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <FormField
-                        control={newForm.control}
-                        name="logo.text"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Logo Text</FormLabel>
-                            <FormControl>
-                              <Input
-                                placeholder="MyBlog"
-                                {...field}
-                                data-testid="input-logo-text"
-                              />
-                            </FormControl>
-                            <FormDescription>
-                              Text displayed in the logo area
-                            </FormDescription>
-                          </FormItem>
-                        )}
-                      />
+              <TabsContent value="logo" className="mt-6 space-y-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle>Logo Settings</CardTitle>
+                    <CardDescription>
+                      Configure how your logo appears
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <FormField
+                      control={newForm.control}
+                      name="logo.text"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Logo Text</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="MyBlog"
+                              {...field}
+                              data-testid="input-logo-text"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Text displayed in the logo area
+                          </FormDescription>
+                        </FormItem>
+                      )}
+                    />
 
-                      <FormField
-                        control={newForm.control}
-                        name="logo.icon"
-                        render={({ field }) => (
-                          <FormItem>
-                            <FormLabel>Logo Icon (optional)</FormLabel>
-                            <FormControl>
-                              <Input
-                                placeholder="/favicon.svg"
-                                {...field}
-                                data-testid="input-logo-icon"
-                              />
-                            </FormControl>
+                    <FormField
+                      control={newForm.control}
+                      name="logo.showIcon"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">Show Icon</FormLabel>
                             <FormDescription>
-                              Path to an icon image
+                              Display an icon next to the logo text
                             </FormDescription>
-                          </FormItem>
-                        )}
-                      />
-                    </div>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              data-testid="switch-logo-show-icon"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="logo.iconText"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Icon Text</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="MB"
+                              maxLength={2}
+                              {...field}
+                              data-testid="input-logo-icon-text"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            1-2 characters displayed as logo icon (when icon is enabled)
+                          </FormDescription>
+                        </FormItem>
+                      )}
+                    />
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -497,38 +629,60 @@ export default function Branding() {
                     </CardDescription>
                   </CardHeader>
                   <CardContent className="space-y-4">
-                    <FormField
-                      control={newForm.control}
-                      name="seo.title"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>SEO Title</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="My Blog | Tech & Design"
-                              {...field}
-                              data-testid="input-seo-title"
-                            />
-                          </FormControl>
-                          <FormDescription>
-                            Title shown in search results and browser tabs
-                          </FormDescription>
-                        </FormItem>
-                      )}
-                    />
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <FormField
+                        control={newForm.control}
+                        name="seo.defaultTitle"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Default Title</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="My Blog"
+                                {...field}
+                                data-testid="input-seo-default-title"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Default page title
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.titleTemplate"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Title Template</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="%s | My Blog"
+                                {...field}
+                                data-testid="input-seo-title-template"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Template for page titles (%s = page title)
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
 
                     <FormField
                       control={newForm.control}
-                      name="seo.description"
+                      name="seo.defaultDescription"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>SEO Description</FormLabel>
+                          <FormLabel>Default Description</FormLabel>
                           <FormControl>
                             <Textarea
                               placeholder="Discover the latest in technology and design..."
                               rows={3}
                               {...field}
-                              data-testid="input-seo-description"
+                              data-testid="input-seo-default-description"
                             />
                           </FormControl>
                           <FormDescription>
@@ -540,43 +694,292 @@ export default function Branding() {
 
                     <FormField
                       control={newForm.control}
-                      name="seo.ogImage"
+                      name="seo.defaultImage"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Open Graph Image</FormLabel>
+                          <FormLabel>Default OG Image</FormLabel>
                           <FormControl>
-                            <Input
-                              placeholder="/og-image.png"
-                              {...field}
-                              data-testid="input-og-image"
+                            <ImageUpload
+                              value={field.value}
+                              onChange={field.onChange}
+                              description="Image shown when sharing on social media (recommended: 1200x630px)"
+                              data-testid="image-upload-default-image"
                             />
                           </FormControl>
-                          <FormDescription>
-                            Image shown when sharing on social media
-                          </FormDescription>
                         </FormItem>
                       )}
                     />
 
                     <FormField
                       control={newForm.control}
-                      name="seo.twitterHandle"
+                      name="seo.keywords"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Twitter Handle</FormLabel>
+                          <FormLabel>Keywords</FormLabel>
                           <FormControl>
                             <Input
-                              placeholder="@username"
+                              placeholder="blog, technology, design, programming"
                               {...field}
-                              data-testid="input-twitter-handle"
+                              data-testid="input-seo-keywords"
                             />
                           </FormControl>
                           <FormDescription>
-                            Your Twitter/X handle for social cards
+                            Comma-separated list of keywords
                           </FormDescription>
                         </FormItem>
                       )}
                     />
+
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <FormField
+                        control={newForm.control}
+                        name="seo.language"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Language</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="en"
+                                {...field}
+                                data-testid="input-seo-language"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.locale"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Locale</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="en_US"
+                                {...field}
+                                data-testid="input-seo-locale"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.themeColor"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Theme Color</FormLabel>
+                            <FormControl>
+                              <div className="flex gap-2">
+                                <Input
+                                  type="color"
+                                  className="w-12 h-9 p-1 cursor-pointer"
+                                  value={field.value}
+                                  onChange={field.onChange}
+                                  data-testid="input-seo-theme-color"
+                                />
+                                <Input
+                                  placeholder="#000000"
+                                  value={field.value}
+                                  onChange={field.onChange}
+                                  className="flex-1"
+                                  data-testid="input-seo-theme-color-text"
+                                />
+                              </div>
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <FormField
+                      control={newForm.control}
+                      name="seo.robots"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Robots</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="index, follow"
+                              {...field}
+                              data-testid="input-seo-robots"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Robots meta tag directives
+                          </FormDescription>
+                        </FormItem>
+                      )}
+                    />
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <FormField
+                        control={newForm.control}
+                        name="seo.twitterHandle"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Twitter Handle</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="@username"
+                                {...field}
+                                data-testid="input-seo-twitter-handle"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.twitterCardType"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Twitter Card Type</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value}>
+                              <FormControl>
+                                <SelectTrigger data-testid="select-twitter-card-type">
+                                  <SelectValue placeholder="Select card type" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                <SelectItem value="summary" data-testid="select-item-summary">Summary</SelectItem>
+                                <SelectItem value="summary_large_image" data-testid="select-item-summary-large">Summary Large Image</SelectItem>
+                                <SelectItem value="app" data-testid="select-item-app">App</SelectItem>
+                                <SelectItem value="player" data-testid="select-item-player">Player</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <FormField
+                        control={newForm.control}
+                        name="seo.facebookAppId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Facebook App ID</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="123456789"
+                                {...field}
+                                data-testid="input-seo-facebook-app-id"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.googleAnalyticsId"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Google Analytics ID</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="G-XXXXXXXXXX"
+                                {...field}
+                                data-testid="input-seo-google-analytics-id"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <FormField
+                        control={newForm.control}
+                        name="seo.googleSiteVerification"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Google Site Verification</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="verification-code"
+                                {...field}
+                                data-testid="input-seo-google-verification"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.bingSiteVerification"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Bing Site Verification</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="verification-code"
+                                {...field}
+                                data-testid="input-seo-bing-verification"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
+
+                    <div className="grid gap-4 md:grid-cols-3">
+                      <FormField
+                        control={newForm.control}
+                        name="seo.author"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Author</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="John Doe"
+                                {...field}
+                                data-testid="input-seo-author"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.publisher"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Publisher</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="My Company"
+                                {...field}
+                                data-testid="input-seo-publisher"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="seo.copyrightYear"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Copyright Year</FormLabel>
+                            <FormControl>
+                              <Input
+                                placeholder="2025"
+                                {...field}
+                                data-testid="input-seo-copyright-year"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -592,23 +995,6 @@ export default function Branding() {
                   <CardContent className="grid gap-4 md:grid-cols-2">
                     <FormField
                       control={newForm.control}
-                      name="social.github"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>GitHub</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="https://github.com/username"
-                              {...field}
-                              data-testid="input-social-github"
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
-
-                    <FormField
-                      control={newForm.control}
                       name="social.twitter"
                       render={({ field }) => (
                         <FormItem>
@@ -618,6 +1004,23 @@ export default function Branding() {
                               placeholder="https://twitter.com/username"
                               {...field}
                               data-testid="input-social-twitter"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="social.linkedin"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>LinkedIn</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="https://linkedin.com/in/username"
+                              {...field}
+                              data-testid="input-social-linkedin"
                             />
                           </FormControl>
                         </FormItem>
@@ -652,6 +1055,40 @@ export default function Branding() {
                               placeholder="https://instagram.com/username"
                               {...field}
                               data-testid="input-social-instagram"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="social.github"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>GitHub</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="https://github.com/username"
+                              {...field}
+                              data-testid="input-social-github"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="social.youtube"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>YouTube</FormLabel>
+                          <FormControl>
+                            <Input
+                              placeholder="https://youtube.com/@channel"
+                              {...field}
+                              data-testid="input-social-youtube"
                             />
                           </FormControl>
                         </FormItem>
@@ -694,10 +1131,31 @@ export default function Branding() {
 
                     <FormField
                       control={newForm.control}
+                      name="contact.phone"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Phone Number</FormLabel>
+                          <FormControl>
+                            <Input
+                              type="tel"
+                              placeholder="+1 234 567 8900"
+                              {...field}
+                              data-testid="input-contact-phone"
+                            />
+                          </FormControl>
+                          <FormDescription>
+                            Public phone number (optional)
+                          </FormDescription>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
                       name="contact.address"
                       render={({ field }) => (
                         <FormItem>
-                          <FormLabel>Address (optional)</FormLabel>
+                          <FormLabel>Address</FormLabel>
                           <FormControl>
                             <Textarea
                               placeholder="123 Main St, City, Country"
@@ -729,7 +1187,7 @@ export default function Branding() {
                       control={newForm.control}
                       name="features.enableSearch"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
                           <div className="space-y-0.5">
                             <FormLabel className="text-base">Enable Search</FormLabel>
                             <FormDescription>
@@ -749,20 +1207,20 @@ export default function Branding() {
 
                     <FormField
                       control={newForm.control}
-                      name="features.showTags"
+                      name="features.enableCategories"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
                           <div className="space-y-0.5">
-                            <FormLabel className="text-base">Show Tags</FormLabel>
+                            <FormLabel className="text-base">Enable Categories</FormLabel>
                             <FormDescription>
-                              Display post tags on your blog
+                              Show category organization for posts
                             </FormDescription>
                           </div>
                           <FormControl>
                             <Switch
                               checked={field.value}
                               onCheckedChange={field.onChange}
-                              data-testid="switch-show-tags"
+                              data-testid="switch-enable-categories"
                             />
                           </FormControl>
                         </FormItem>
@@ -771,9 +1229,75 @@ export default function Branding() {
 
                     <FormField
                       control={newForm.control}
-                      name="features.enableRSS"
+                      name="features.enableTags"
                       render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">Enable Tags</FormLabel>
+                            <FormDescription>
+                              Display post tags on your blog
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              data-testid="switch-enable-tags"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="features.enableComments"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">Enable Comments</FormLabel>
+                            <FormDescription>
+                              Allow visitors to comment on posts
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              data-testid="switch-enable-comments"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="features.enableNewsletter"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
+                          <div className="space-y-0.5">
+                            <FormLabel className="text-base">Enable Newsletter</FormLabel>
+                            <FormDescription>
+                              Show newsletter subscription form
+                            </FormDescription>
+                          </div>
+                          <FormControl>
+                            <Switch
+                              checked={field.value}
+                              onCheckedChange={field.onChange}
+                              data-testid="switch-enable-newsletter"
+                            />
+                          </FormControl>
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={newForm.control}
+                      name="features.enableRss"
+                      render={({ field }) => (
+                        <FormItem className="flex flex-row items-center justify-between gap-4 rounded-lg border p-4">
                           <div className="space-y-0.5">
                             <FormLabel className="text-base">Enable RSS Feed</FormLabel>
                             <FormDescription>
@@ -791,27 +1315,53 @@ export default function Branding() {
                       )}
                     />
 
-                    <FormField
-                      control={newForm.control}
-                      name="features.enableSitemap"
-                      render={({ field }) => (
-                        <FormItem className="flex flex-row items-center justify-between rounded-lg border p-4">
-                          <div className="space-y-0.5">
-                            <FormLabel className="text-base">Enable Sitemap</FormLabel>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <FormField
+                        control={newForm.control}
+                        name="features.postsPerPage"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Posts Per Page</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={100}
+                                {...field}
+                                onChange={(e) => field.onChange(parseInt(e.target.value) || 10)}
+                                data-testid="input-posts-per-page"
+                              />
+                            </FormControl>
                             <FormDescription>
-                              Generate a sitemap.xml for search engines
+                              Number of posts to show per page (1-100)
                             </FormDescription>
-                          </div>
-                          <FormControl>
-                            <Switch
-                              checked={field.value}
-                              onCheckedChange={field.onChange}
-                              data-testid="switch-enable-sitemap"
-                            />
-                          </FormControl>
-                        </FormItem>
-                      )}
-                    />
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={newForm.control}
+                        name="features.relatedPostsCount"
+                        render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Related Posts Count</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="number"
+                                min={0}
+                                max={20}
+                                {...field}
+                                onChange={(e) => field.onChange(parseInt(e.target.value) || 3)}
+                                data-testid="input-related-posts-count"
+                              />
+                            </FormControl>
+                            <FormDescription>
+                              Number of related posts to show (0-20)
+                            </FormDescription>
+                          </FormItem>
+                        )}
+                      />
+                    </div>
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -822,11 +1372,10 @@ export default function Branding() {
     );
   }
 
-  // Legacy template UI
   return (
     <div className="p-6 max-w-4xl mx-auto space-y-6">
       <div>
-        <h1 className="text-3xl font-semibold">Branding</h1>
+        <h1 className="text-3xl font-semibold" data-testid="text-legacy-page-title">Branding</h1>
         <p className="text-muted-foreground mt-1">
           Edit Header.astro and Footer.astro directly
         </p>
@@ -856,7 +1405,7 @@ export default function Branding() {
                         <Input
                           placeholder="My Blog"
                           {...field}
-                          data-testid="input-site-name"
+                          data-testid="input-legacy-site-name"
                         />
                       </FormControl>
                       <FormDescription>
@@ -878,7 +1427,7 @@ export default function Branding() {
                           placeholder="R"
                           maxLength={2}
                           {...field}
-                          data-testid="input-logo-letter"
+                          data-testid="input-legacy-logo-letter"
                         />
                       </FormControl>
                       <FormDescription>
@@ -901,7 +1450,7 @@ export default function Branding() {
                         placeholder="A short description about your site..."
                         rows={3}
                         {...field}
-                        data-testid="input-description"
+                        data-testid="input-legacy-description"
                       />
                     </FormControl>
                     <FormDescription>
@@ -934,7 +1483,7 @@ export default function Branding() {
                       <Input
                         placeholder="https://twitter.com/username"
                         {...field}
-                        data-testid="input-social-twitter"
+                        data-testid="input-legacy-social-twitter"
                       />
                     </FormControl>
                   </FormItem>
@@ -951,7 +1500,7 @@ export default function Branding() {
                       <Input
                         placeholder="https://linkedin.com/in/username"
                         {...field}
-                        data-testid="input-social-linkedin"
+                        data-testid="input-legacy-social-linkedin"
                       />
                     </FormControl>
                   </FormItem>
@@ -968,7 +1517,7 @@ export default function Branding() {
                       <Input
                         placeholder="https://facebook.com/page"
                         {...field}
-                        data-testid="input-social-facebook"
+                        data-testid="input-legacy-social-facebook"
                       />
                     </FormControl>
                   </FormItem>
@@ -992,7 +1541,7 @@ export default function Branding() {
                 <div>
                   <p className="text-sm font-medium mb-2">Header.astro</p>
                   <div className="bg-muted p-3 rounded-md max-h-32 overflow-auto">
-                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap">
+                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap" data-testid="text-header-preview">
                       {legacyBrandingData.data.headerContent.slice(0, 500)}...
                     </pre>
                   </div>
@@ -1000,7 +1549,7 @@ export default function Branding() {
                 <div>
                   <p className="text-sm font-medium mb-2">Footer.astro</p>
                   <div className="bg-muted p-3 rounded-md max-h-32 overflow-auto">
-                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap">
+                    <pre className="text-xs text-muted-foreground whitespace-pre-wrap" data-testid="text-footer-preview">
                       {legacyBrandingData.data.footerContent.slice(0, 500)}...
                     </pre>
                   </div>
@@ -1013,7 +1562,7 @@ export default function Branding() {
             <Button
               type="submit"
               disabled={saveLegacyMutation.isPending}
-              data-testid="button-save-branding"
+              data-testid="button-save-legacy-branding"
             >
               {saveLegacyMutation.isPending ? (
                 <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
