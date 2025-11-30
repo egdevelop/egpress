@@ -83,32 +83,42 @@ Make sure the content is:
 - Properly formatted for web reading
 - Free of fluff and filler content`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-pro-preview",
-    contents: prompt,
-    config: {
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: "object",
-        properties: {
-          title: { type: "string" },
-          description: { type: "string" },
-          content: { type: "string" },
-          tags: { type: "array", items: { type: "string" } },
-          heroImage: { type: "string" },
-          heroImageAlt: { type: "string" },
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-pro-preview",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            description: { type: "string" },
+            content: { type: "string" },
+            tags: { type: "array", items: { type: "string" } },
+            heroImage: { type: "string" },
+            heroImageAlt: { type: "string" },
+          },
+          required: ["title", "description", "content", "tags"],
         },
-        required: ["title", "description", "content", "tags"],
       },
-    },
-  });
+    });
 
-  const rawJson = response.text;
-  if (!rawJson) {
-    throw new Error("Empty response from Gemini");
+    const rawJson = response.text;
+    if (!rawJson) {
+      throw new Error("Empty response from Gemini");
+    }
+
+    return JSON.parse(rawJson);
+  } catch (error: any) {
+    if (error?.message?.includes("403") || error?.status === 403) {
+      throw new Error("API belum diaktifkan. Silakan aktifkan Generative Language API di Google Cloud Console: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com");
+    }
+    if (error?.message?.includes("404") || error?.status === 404) {
+      throw new Error("Model tidak ditemukan. Pastikan Anda memiliki akses ke Gemini 3 Pro Preview.");
+    }
+    throw error;
   }
-
-  return JSON.parse(rawJson);
 }
 
 export async function generateImage(
@@ -122,23 +132,33 @@ Style: Modern, clean, visually appealing, suitable for a professional blog.
 Aspect ratio: 16:9 landscape format.
 No text or watermarks in the image.`;
 
-  const response = await ai.models.generateContent({
-    model: "gemini-3-pro-image-preview",
-    contents: [{ role: "user", parts: [{ text: enhancedPrompt }] }],
-    config: {
-      responseModalities: [Modality.TEXT, Modality.IMAGE],
-    },
-  });
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-pro-image-preview",
+      contents: [{ role: "user", parts: [{ text: enhancedPrompt }] }],
+      config: {
+        responseModalities: [Modality.TEXT, Modality.IMAGE],
+      },
+    });
 
-  const candidate = response.candidates?.[0];
-  const imagePart = candidate?.content?.parts?.find((part: any) => part.inlineData);
-  
-  if (!imagePart?.inlineData?.data) {
-    throw new Error("No image data in response. The model may not support image generation.");
+    const candidate = response.candidates?.[0];
+    const imagePart = candidate?.content?.parts?.find((part: any) => part.inlineData);
+    
+    if (!imagePart?.inlineData?.data) {
+      throw new Error("No image data in response. The model may not support image generation.");
+    }
+
+    return {
+      imageData: imagePart.inlineData.data,
+      mimeType: imagePart.inlineData.mimeType || "image/png",
+    };
+  } catch (error: any) {
+    if (error?.message?.includes("403") || error?.status === 403) {
+      throw new Error("API belum diaktifkan. Silakan aktifkan Generative Language API di Google Cloud Console: https://console.developers.google.com/apis/api/generativelanguage.googleapis.com");
+    }
+    if (error?.message?.includes("404") || error?.status === 404) {
+      throw new Error("Model tidak ditemukan. Pastikan Anda memiliki akses ke Nano Banana Pro (gemini-3-pro-image-preview).");
+    }
+    throw error;
   }
-
-  return {
-    imageData: imagePart.inlineData.data,
-    mimeType: imagePart.inlineData.mimeType || "image/png",
-  };
 }
