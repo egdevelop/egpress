@@ -2190,18 +2190,68 @@ export async function registerRoutes(
         return null;
       }
       
-      // Extract designTokens.colors
+      // Extract full designTokens (colors, typography, spacing, borderRadius, shadows)
       const designTokensProp = findProperty(rootObj, 'designTokens');
-      let colors: Record<string, any> = { text: {} };
+      let designTokens: Record<string, any> = {
+        colors: { text: {} },
+        typography: {
+          fontFamily: {},
+          fontSize: {},
+          fontWeight: {},
+          lineHeight: {}
+        },
+        spacing: {},
+        borderRadius: {},
+        shadows: {}
+      };
       
       if (designTokensProp) {
         const designTokensObj = designTokensProp.getInitializer();
         if (designTokensObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
-          const colorsProp = findProperty(designTokensObj as ObjectLiteralExpression, 'colors');
+          const designTokensLiteral = designTokensObj as ObjectLiteralExpression;
+          
+          // Extract colors
+          const colorsProp = findProperty(designTokensLiteral, 'colors');
           if (colorsProp) {
             const colorsValue = extractNodeValue(colorsProp.getInitializer());
             if (colorsValue && typeof colorsValue === 'object') {
-              colors = colorsValue;
+              designTokens.colors = colorsValue;
+            }
+          }
+          
+          // Extract typography
+          const typographyProp = findProperty(designTokensLiteral, 'typography');
+          if (typographyProp) {
+            const typographyValue = extractNodeValue(typographyProp.getInitializer());
+            if (typographyValue && typeof typographyValue === 'object') {
+              designTokens.typography = typographyValue;
+            }
+          }
+          
+          // Extract spacing
+          const spacingProp = findProperty(designTokensLiteral, 'spacing');
+          if (spacingProp) {
+            const spacingValue = extractNodeValue(spacingProp.getInitializer());
+            if (spacingValue && typeof spacingValue === 'object') {
+              designTokens.spacing = spacingValue;
+            }
+          }
+          
+          // Extract borderRadius
+          const borderRadiusProp = findProperty(designTokensLiteral, 'borderRadius');
+          if (borderRadiusProp) {
+            const borderRadiusValue = extractNodeValue(borderRadiusProp.getInitializer());
+            if (borderRadiusValue && typeof borderRadiusValue === 'object') {
+              designTokens.borderRadius = borderRadiusValue;
+            }
+          }
+          
+          // Extract shadows
+          const shadowsProp = findProperty(designTokensLiteral, 'shadows');
+          if (shadowsProp) {
+            const shadowsValue = extractNodeValue(shadowsProp.getInitializer());
+            if (shadowsValue && typeof shadowsValue === 'object') {
+              designTokens.shadows = shadowsValue;
             }
           }
         }
@@ -2225,9 +2275,7 @@ export async function registerRoutes(
       }
       
       return {
-        designTokens: {
-          colors
-        },
+        designTokens,
         siteSettings
       };
     } catch (error) {
@@ -2453,8 +2501,38 @@ export async function registerRoutes(
     return null;
   }
   
-  // Helper function to update color values in siteSettings.ts content using AST
-  function updateDesignTokensInTS(content: string, colors: Record<string, any>): string {
+  // Helper function to update a number value in a property
+  function updateNumberProperty(prop: PropertyAssignment, newValue: number): void {
+    const initializer = prop.getInitializer();
+    if (initializer?.isKind(SyntaxKind.NumericLiteral) || initializer?.isKind(SyntaxKind.PrefixUnaryExpression)) {
+      initializer.replaceWithText(String(newValue));
+    }
+  }
+  
+  // Helper to recursively update properties in an object, handling nested objects and numbers
+  function updateNestedPropertiesWithNumbers(obj: ObjectLiteralExpression, updates: Record<string, any>): void {
+    for (const [key, value] of Object.entries(updates)) {
+      const prop = findProperty(obj, key);
+      if (!prop) continue;
+      
+      if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+        // Handle nested object recursively
+        const nestedObj = prop.getInitializer();
+        if (nestedObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+          updateNestedPropertiesWithNumbers(nestedObj as ObjectLiteralExpression, value);
+        }
+      } else if (typeof value === 'string') {
+        updateStringProperty(prop, value);
+      } else if (typeof value === 'boolean') {
+        updateBooleanProperty(prop, value);
+      } else if (typeof value === 'number') {
+        updateNumberProperty(prop, value);
+      }
+    }
+  }
+  
+  // Helper function to update all designTokens in siteSettings.ts content using AST
+  function updateDesignTokensInTS(content: string, designTokens: Record<string, any>): string {
     try {
       const project = new Project({ useInMemoryFileSystem: true });
       const sourceFile = project.createSourceFile('temp.ts', content);
@@ -2463,23 +2541,69 @@ export async function registerRoutes(
       const rootObj = getRootConfigObject(sourceFile);
       if (!rootObj) return content;
       
-      // Navigate to designTokens.colors
+      // Navigate to designTokens
       const designTokensProp = findProperty(rootObj, 'designTokens');
       if (!designTokensProp) return content;
       
       const designTokensObj = designTokensProp.getInitializer();
       if (!designTokensObj?.isKind(SyntaxKind.ObjectLiteralExpression)) return content;
       
-      const colorsProp = findProperty(designTokensObj as ObjectLiteralExpression, 'colors');
-      if (!colorsProp) return content;
+      const designTokensLiteral = designTokensObj as ObjectLiteralExpression;
       
-      const colorsObj = colorsProp.getInitializer();
-      if (!colorsObj?.isKind(SyntaxKind.ObjectLiteralExpression)) return content;
+      // Update colors if provided
+      if (designTokens.colors) {
+        const colorsProp = findProperty(designTokensLiteral, 'colors');
+        if (colorsProp) {
+          const colorsObj = colorsProp.getInitializer();
+          if (colorsObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            updateNestedProperties(colorsObj as ObjectLiteralExpression, designTokens.colors);
+          }
+        }
+      }
       
-      const colorsLiteral = colorsObj as ObjectLiteralExpression;
+      // Update typography if provided
+      if (designTokens.typography) {
+        const typographyProp = findProperty(designTokensLiteral, 'typography');
+        if (typographyProp) {
+          const typographyObj = typographyProp.getInitializer();
+          if (typographyObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            updateNestedPropertiesWithNumbers(typographyObj as ObjectLiteralExpression, designTokens.typography);
+          }
+        }
+      }
       
-      // Update colors using recursive helper (handles nested text colors)
-      updateNestedProperties(colorsLiteral, colors);
+      // Update spacing if provided
+      if (designTokens.spacing) {
+        const spacingProp = findProperty(designTokensLiteral, 'spacing');
+        if (spacingProp) {
+          const spacingObj = spacingProp.getInitializer();
+          if (spacingObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            updateNestedProperties(spacingObj as ObjectLiteralExpression, designTokens.spacing);
+          }
+        }
+      }
+      
+      // Update borderRadius if provided
+      if (designTokens.borderRadius) {
+        const borderRadiusProp = findProperty(designTokensLiteral, 'borderRadius');
+        if (borderRadiusProp) {
+          const borderRadiusObj = borderRadiusProp.getInitializer();
+          if (borderRadiusObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            updateNestedProperties(borderRadiusObj as ObjectLiteralExpression, designTokens.borderRadius);
+          }
+        }
+      }
+      
+      // Update shadows if provided
+      if (designTokens.shadows) {
+        const shadowsProp = findProperty(designTokensLiteral, 'shadows');
+        if (shadowsProp) {
+          const shadowsObj = shadowsProp.getInitializer();
+          if (shadowsObj?.isKind(SyntaxKind.ObjectLiteralExpression)) {
+            updateNestedProperties(shadowsObj as ObjectLiteralExpression, designTokens.shadows);
+          }
+        }
+      }
       
       return sourceFile.getFullText();
     } catch (error) {
@@ -2602,9 +2726,9 @@ export async function registerRoutes(
       let content = Buffer.from(data.content, "base64").toString("utf-8");
       const originalContent = content;
 
-      // Update design tokens (colors)
-      if (designTokens?.colors) {
-        content = updateDesignTokensInTS(content, designTokens.colors);
+      // Update design tokens (colors, typography, spacing, borderRadius, shadows)
+      if (designTokens) {
+        content = updateDesignTokensInTS(content, designTokens);
       }
 
       // Update site settings
@@ -2639,6 +2763,244 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Update site settings error:", error);
       res.json({ success: false, error: error.message || "Failed to update site settings" });
+    }
+  });
+
+  // ============== CONTENT DEFAULTS (New Template) ==============
+  // For template-egpress-v1 contentDefaults section in siteSettings.ts
+
+  // Parse contentDefaults from siteSettings.ts
+  function parseContentDefaultsTS(content: string): any {
+    try {
+      const project = new Project({ useInMemoryFileSystem: true });
+      const sourceFile = project.createSourceFile('temp.ts', content);
+      
+      const rootObj = getRootConfigForParsing(sourceFile);
+      if (!rootObj) {
+        console.error("Could not find root config object in siteSettings.ts");
+        return null;
+      }
+      
+      // Extract contentDefaults
+      const contentDefaultsProp = findProperty(rootObj, 'contentDefaults');
+      let contentDefaults: Record<string, any> = {
+        navigation: {
+          header: [],
+          footer: []
+        },
+        socialLinks: [],
+        homepage: {
+          heroTitle: "",
+          heroSubtitle: "",
+          featuredSectionTitle: "",
+          latestSectionTitle: ""
+        },
+        blog: {
+          title: "",
+          description: "",
+          emptyStateMessage: ""
+        },
+        categories: []
+      };
+      
+      if (contentDefaultsProp) {
+        const contentDefaultsValue = extractNodeValue(contentDefaultsProp.getInitializer());
+        if (contentDefaultsValue && typeof contentDefaultsValue === 'object') {
+          contentDefaults = { ...contentDefaults, ...contentDefaultsValue };
+        }
+      }
+      
+      return contentDefaults;
+    } catch (error) {
+      console.error("Error parsing contentDefaults:", error);
+      return null;
+    }
+  }
+
+  // Helper to convert a value to TypeScript literal string
+  function valueToTSLiteral(value: any, indent: string = '    '): string {
+    if (value === null || value === undefined) {
+      return 'undefined';
+    }
+    if (typeof value === 'string') {
+      const escaped = value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+      return `'${escaped}'`;
+    }
+    if (typeof value === 'number') {
+      return String(value);
+    }
+    if (typeof value === 'boolean') {
+      return String(value);
+    }
+    if (Array.isArray(value)) {
+      if (value.length === 0) return '[]';
+      const items = value.map(item => valueToTSLiteral(item, indent + '  ')).join(',\n' + indent + '  ');
+      return `[\n${indent}  ${items}\n${indent}]`;
+    }
+    if (typeof value === 'object') {
+      const entries = Object.entries(value);
+      if (entries.length === 0) return '{}';
+      const props = entries
+        .map(([k, v]) => `${k}: ${valueToTSLiteral(v, indent + '  ')}`)
+        .join(',\n' + indent + '  ');
+      return `{\n${indent}  ${props}\n${indent}}`;
+    }
+    return String(value);
+  }
+
+  // Update contentDefaults in siteSettings.ts using AST
+  function updateContentDefaultsInTS(content: string, contentDefaults: Record<string, any>): string {
+    try {
+      const project = new Project({ useInMemoryFileSystem: true });
+      const sourceFile = project.createSourceFile('temp.ts', content);
+      
+      const rootObj = getRootConfigObject(sourceFile);
+      if (!rootObj) return content;
+      
+      const contentDefaultsProp = findProperty(rootObj, 'contentDefaults');
+      if (!contentDefaultsProp) return content;
+      
+      const contentDefaultsObj = contentDefaultsProp.getInitializer();
+      if (!contentDefaultsObj?.isKind(SyntaxKind.ObjectLiteralExpression)) return content;
+      
+      const cdLiteral = contentDefaultsObj as ObjectLiteralExpression;
+      
+      // Update each section of contentDefaults
+      for (const [key, value] of Object.entries(contentDefaults)) {
+        const prop = findProperty(cdLiteral, key);
+        if (!prop) continue;
+        
+        // For arrays and objects, replace the entire initializer
+        if (Array.isArray(value) || (typeof value === 'object' && value !== null)) {
+          const newValue = valueToTSLiteral(value, '      ');
+          prop.getInitializer()?.replaceWithText(newValue);
+        } else if (typeof value === 'string') {
+          updateStringProperty(prop, value);
+        } else if (typeof value === 'boolean') {
+          updateBooleanProperty(prop, value);
+        }
+      }
+      
+      return sourceFile.getFullText();
+    } catch (error) {
+      console.error('Error in updateContentDefaultsInTS:', error);
+      return content;
+    }
+  }
+
+  // Get content defaults from siteSettings.ts
+  app.get("/api/content-defaults", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+      const filePath = "src/config/siteSettings.ts";
+
+      try {
+        const { data } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: filePath,
+          ref: repo.activeBranch,
+        });
+
+        if (!Array.isArray(data) && "content" in data) {
+          const content = Buffer.from(data.content, "base64").toString("utf-8");
+          const contentDefaults = parseContentDefaultsTS(content);
+          
+          if (contentDefaults) {
+            res.json({ 
+              success: true, 
+              data: contentDefaults,
+              source: filePath
+            });
+          } else {
+            res.json({ 
+              success: false, 
+              error: "Could not parse contentDefaults from siteSettings.ts"
+            });
+          }
+        } else {
+          res.json({ success: false, error: "Invalid file response" });
+        }
+      } catch (err: any) {
+        if (err.status === 404) {
+          res.json({ 
+            success: false, 
+            error: "siteSettings.ts not found - this may not be an egpress-v1 template"
+          });
+        } else {
+          throw err;
+        }
+      }
+    } catch (error: any) {
+      console.error("Get content defaults error:", error);
+      res.json({ success: false, error: error.message || "Failed to get content defaults" });
+    }
+  });
+
+  // Update content defaults in siteSettings.ts
+  app.put("/api/content-defaults", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const { contentDefaults, commitMessage } = req.body;
+      const octokit = await getGitHubClient();
+      const filePath = "src/config/siteSettings.ts";
+
+      // Get current file content
+      const { data } = await octokit.repos.getContent({
+        owner: repo.owner,
+        repo: repo.name,
+        path: filePath,
+        ref: repo.activeBranch,
+      });
+
+      if (Array.isArray(data) || !("content" in data)) {
+        return res.json({ success: false, error: "Invalid file response" });
+      }
+
+      let content = Buffer.from(data.content, "base64").toString("utf-8");
+      const originalContent = content;
+
+      // Update content defaults
+      if (contentDefaults) {
+        content = updateContentDefaultsInTS(content, contentDefaults);
+      }
+
+      // Only commit if content changed
+      if (content !== originalContent) {
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: filePath,
+          message: commitMessage || "Update content defaults",
+          content: Buffer.from(content).toString("base64"),
+          sha: data.sha,
+          branch: repo.activeBranch,
+        });
+
+        res.json({ 
+          success: true, 
+          message: "Content defaults updated successfully",
+          filePath
+        });
+      } else {
+        res.json({ 
+          success: true, 
+          message: "No changes detected",
+          filePath
+        });
+      }
+    } catch (error: any) {
+      console.error("Update content defaults error:", error);
+      res.json({ success: false, error: error.message || "Failed to update content defaults" });
     }
   });
 

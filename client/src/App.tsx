@@ -12,7 +12,7 @@ import Dashboard from "@/pages/dashboard";
 import Posts from "@/pages/posts";
 import PostEditor from "@/pages/post-editor";
 import FileBrowser from "@/pages/file-browser";
-import ThemeCustomizer from "@/pages/theme-customizer";
+import ThemePage from "@/pages/theme";
 import Settings from "@/pages/settings";
 import NotFound from "@/pages/not-found";
 import Adsense from "@/pages/adsense";
@@ -22,6 +22,7 @@ import CloneSite from "@/pages/clone-site";
 import AIGenerator from "@/pages/ai-generator";
 import SearchConsole from "@/pages/search-console";
 import VercelPage from "@/pages/vercel";
+import ContentDefaultsPage from "@/pages/content-defaults";
 import Login from "@/pages/login";
 import { Loader2 } from "lucide-react";
 
@@ -32,13 +33,14 @@ function Router() {
       <Route path="/posts" component={Posts} />
       <Route path="/posts/:slug" component={PostEditor} />
       <Route path="/files" component={FileBrowser} />
-      <Route path="/theme" component={ThemeCustomizer} />
+      <Route path="/theme" component={ThemePage} />
       <Route path="/pages" component={PagesEditor} />
       <Route path="/branding" component={Branding} />
       <Route path="/adsense" component={Adsense} />
       <Route path="/ai" component={AIGenerator} />
       <Route path="/search-console" component={SearchConsole} />
       <Route path="/vercel" component={VercelPage} />
+      <Route path="/content-defaults" component={ContentDefaultsPage} />
       <Route path="/clone" component={CloneSite} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />

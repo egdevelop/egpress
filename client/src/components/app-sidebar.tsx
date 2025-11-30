@@ -19,7 +19,8 @@ import {
   ChevronsUpDown,
   Lock,
   Unplug,
-  ArrowRightLeft
+  ArrowRightLeft,
+  FileSliders
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -106,6 +107,12 @@ const appearanceItems = [
     url: "/branding",
     icon: Image,
     description: "Logo, name & social",
+  },
+  {
+    title: "Content Defaults",
+    url: "/content-defaults",
+    icon: FileSliders,
+    description: "Nav, homepage & blog",
   },
 ];
 
