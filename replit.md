@@ -79,6 +79,15 @@ The system comprises a React-based frontend and an Express.js backend.
 - Seamless AI post workflow: generated images automatically uploaded to GitHub and set as hero image when saving draft
 - Auto-populate author from GitHub username when saving AI-generated posts
 - Added /api/upload-image-base64 endpoint for AI-generated image uploads
+- Added Featured Post toggle in post editor for marking posts to display in featured section
+- **Seamless One-Click AI Generation:** Complete workflow overhaul:
+  - Category auto-generation: AI now generates and auto-fills category field
+  - Automatic hero image generation: Images are created right after post content
+  - Image optimization: Built-in compression using Canvas API (WebP format, configurable quality)
+  - Progress indicator: Visual progress bar showing each generation step
+  - All fields auto-filled: title, content, description, tags, category, author, and optimized hero image
+  - Toggle for image generation: Option to skip image generation if not needed
+  - Image stats display: Shows original vs optimized size with compression ratio
 
 ## External Dependencies
 

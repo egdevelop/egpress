@@ -127,7 +127,7 @@ export async function base64ToOptimizedBase64(
   base64Data: string,
   mimeType: string = 'image/png',
   options: OptimizeOptions = {}
-): Promise<{ base64: string; mimeType: string; stats: { originalSize: number; optimizedSize: number; compressionRatio: number } }> {
+): Promise<{ base64: string; mimeType: string; dataUrl: string; stats: { originalSize: number; optimizedSize: number; compressionRatio: number } }> {
   const dataUrl = base64Data.startsWith('data:') 
     ? base64Data 
     : `data:${mimeType};base64,${base64Data}`;
@@ -145,6 +145,7 @@ export async function base64ToOptimizedBase64(
   return {
     base64,
     mimeType: 'image/webp',
+    dataUrl: optimized.dataUrl,
     stats: {
       originalSize: optimized.originalSize,
       optimizedSize: optimized.optimizedSize,

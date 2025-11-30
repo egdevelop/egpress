@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Progress } from "@/components/ui/progress";
 import {
   Form,
   FormControl,
@@ -43,11 +45,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Sparkles, Key, FileText, RefreshCw, Eye, Edit, X, Check, AlertCircle, ChevronsUpDown, Image, Download } from "lucide-react";
+import { Sparkles, Key, FileText, RefreshCw, Eye, Edit, X, Check, AlertCircle, ChevronsUpDown, Image, Zap, FolderOpen } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
+import { base64ToOptimizedBase64, formatBytes } from "@/lib/image-utils";
 import type { Repository } from "@shared/schema";
 
 const LANGUAGES = [
@@ -116,7 +119,7 @@ const LANGUAGES = [
   { value: "kazakh", label: "Kazakh", native: "Қазақша" },
   { value: "uzbek", label: "Uzbek", native: "O'zbek" },
   { value: "georgian", label: "Georgian", native: "ქართული" },
-  { value: "armenian", label: "Armenian", native: "Հайеreн" },
+  { value: "armenian", label: "Armenian", native: "Hayeren" },
   { value: "mongolian", label: "Mongolian", native: "Монгол" },
   { value: "nepali", label: "Nepali", native: "नेपाली" },
   { value: "sinhala", label: "Sinhala", native: "සිංහල" },
@@ -150,15 +153,36 @@ interface GeneratedPost {
   heroImageAlt?: string;
 }
 
+type GenerationStep = "idle" | "generating-post" | "generating-image" | "optimizing-image" | "complete" | "error";
+
+interface GenerationState {
+  step: GenerationStep;
+  progress: number;
+  message: string;
+}
+
+interface OptimizedImageData {
+  base64: string;
+  mimeType: string;
+  dataUrl: string;
+  originalSize: number;
+  optimizedSize: number;
+  compressionRatio: number;
+}
+
 export default function AIGenerator() {
   const [, navigate] = useLocation();
   const [generatedPost, setGeneratedPost] = useState<GeneratedPost | null>(null);
   const [showPreview, setShowPreview] = useState(true);
   const [keySaved, setKeySaved] = useState(false);
   const [languageOpen, setLanguageOpen] = useState(false);
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
-  const [imagePrompt, setImagePrompt] = useState("");
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [optimizedImage, setOptimizedImage] = useState<OptimizedImageData | null>(null);
+  const [generateWithImage, setGenerateWithImage] = useState(true);
+  const [generationState, setGenerationState] = useState<GenerationState>({
+    step: "idle",
+    progress: 0,
+    message: "",
+  });
   const { toast } = useToast();
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
@@ -190,12 +214,6 @@ export default function AIGenerator() {
       setKeySaved(true);
     }
   }, [keyData?.data?.hasKey]);
-
-  useEffect(() => {
-    if (generatedPost?.heroImage) {
-      setImagePrompt(generatedPost.heroImage);
-    }
-  }, [generatedPost?.heroImage]);
 
   const saveKeyMutation = useMutation({
     mutationFn: async (apiKey: string) => {
@@ -232,10 +250,12 @@ export default function AIGenerator() {
     },
   });
 
-  const generateMutation = useMutation({
+  const generateCompleteMutation = useMutation({
     mutationFn: async (data: AIFormValues) => {
+      setGenerationState({ step: "generating-post", progress: 10, message: "Creating blog post content..." });
+      
       const keywords = data.keywords.split(",").map(k => k.trim()).filter(k => k);
-      const response = await apiRequest("POST", "/api/ai/generate", {
+      const postResponse = await apiRequest("POST", "/api/ai/generate", {
         apiKey: data.apiKey || undefined,
         useSavedKey: keySaved && !data.apiKey,
         topic: data.topic,
@@ -244,63 +264,75 @@ export default function AIGenerator() {
         length: data.length,
         language: data.language,
       });
-      return response.json();
-    },
-    onSuccess: (data) => {
-      if (data.success) {
-        setGeneratedPost(data.data);
-        setGeneratedImageUrl(null);
-        toast({
-          title: "Content Generated",
-          description: "AI has created a blog post draft for you",
+      const postResult = await postResponse.json();
+      
+      if (!postResult.success) {
+        throw new Error(postResult.error || "Failed to generate post");
+      }
+      
+      const generatedPostData = postResult.data as GeneratedPost;
+      setGeneratedPost(generatedPostData);
+      
+      if (!generateWithImage || !generatedPostData.heroImage) {
+        setGenerationState({ step: "complete", progress: 100, message: "Post generated successfully!" });
+        return { post: generatedPostData, image: null };
+      }
+      
+      setGenerationState({ step: "generating-image", progress: 40, message: "Creating hero image..." });
+      
+      try {
+        const imageResponse = await apiRequest("POST", "/api/ai/generate-image", {
+          prompt: generatedPostData.heroImage,
+          useSavedKey: keySaved,
         });
-      } else {
-        toast({
-          title: "Generation Failed",
-          description: data.error || "Failed to generate content",
-          variant: "destructive",
+        const imageResult = await imageResponse.json();
+        
+        if (!imageResult.success || !imageResult.data?.imageUrl) {
+          setGenerationState({ step: "complete", progress: 100, message: "Post generated (image generation failed)" });
+          return { post: generatedPostData, image: null };
+        }
+        
+        setGenerationState({ step: "optimizing-image", progress: 70, message: "Optimizing image for web..." });
+        
+        const imageDataUrl = imageResult.data.imageUrl;
+        const optimized = await base64ToOptimizedBase64(imageDataUrl, "image/png", {
+          maxWidth: 1200,
+          maxHeight: 800,
+          quality: 0.85,
         });
+        
+        const optimizedData: OptimizedImageData = {
+          base64: optimized.base64,
+          mimeType: optimized.mimeType,
+          dataUrl: optimized.dataUrl,
+          ...optimized.stats,
+        };
+        
+        setOptimizedImage(optimizedData);
+        setGenerationState({ step: "complete", progress: 100, message: "Everything ready!" });
+        
+        return { post: generatedPostData, image: optimizedData };
+      } catch (imageError) {
+        console.error("Image generation/optimization failed:", imageError);
+        setGenerationState({ step: "complete", progress: 100, message: "Post generated (image failed)" });
+        return { post: generatedPostData, image: null };
       }
     },
-    onError: () => {
+    onSuccess: () => {
+      toast({
+        title: "Generation Complete",
+        description: generateWithImage 
+          ? "Blog post and hero image are ready!"
+          : "Blog post content is ready!",
+      });
+    },
+    onError: (error: Error) => {
+      setGenerationState({ step: "error", progress: 0, message: error.message });
+      setGeneratedPost(null);
+      setOptimizedImage(null);
       toast({
         title: "Generation Failed",
-        description: "An error occurred while generating content",
-        variant: "destructive",
-      });
-    },
-  });
-
-  const generateImageMutation = useMutation({
-    mutationFn: async (prompt: string) => {
-      setIsGeneratingImage(true);
-      const response = await apiRequest("POST", "/api/ai/generate-image", {
-        prompt,
-        useSavedKey: keySaved,
-      });
-      return response.json();
-    },
-    onSuccess: (data) => {
-      setIsGeneratingImage(false);
-      if (data.success && data.data?.imageUrl) {
-        setGeneratedImageUrl(data.data.imageUrl);
-        toast({
-          title: "Image Generated",
-          description: "Your hero image has been created successfully",
-        });
-      } else {
-        toast({
-          title: "Image Generation Failed",
-          description: data.error || "Failed to generate image",
-          variant: "destructive",
-        });
-      }
-    },
-    onError: () => {
-      setIsGeneratingImage(false);
-      toast({
-        title: "Image Generation Failed",
-        description: "An error occurred while generating the image",
+        description: error.message,
         variant: "destructive",
       });
     },
@@ -317,12 +349,11 @@ export default function AIGenerator() {
       
       let heroImagePath: string | undefined;
       
-      // Upload generated image if available
-      if (generatedImageUrl) {
+      if (optimizedImage) {
         try {
           const uploadResponse = await apiRequest("POST", "/api/upload-image-base64", {
-            imageData: generatedImageUrl,
-            mimeType: "image/png",
+            imageData: optimizedImage.dataUrl,
+            mimeType: optimizedImage.mimeType,
             filename: slug,
           });
           const uploadResult = await uploadResponse.json();
@@ -334,7 +365,6 @@ export default function AIGenerator() {
         }
       }
       
-      // Get author from GitHub user
       const authorName = authData?.data?.user?.name || authData?.data?.user?.login || "Author";
       
       const response = await apiRequest("POST", "/api/posts", {
@@ -343,6 +373,7 @@ export default function AIGenerator() {
         description: generatedPost.description,
         pubDate: new Date().toISOString(),
         tags: generatedPost.tags,
+        category: generatedPost.category,
         draft: true,
         content: generatedPost.content,
         heroImage: heroImagePath,
@@ -352,17 +383,17 @@ export default function AIGenerator() {
       return response.json();
     },
     onSuccess: (data) => {
-      if (data.success) {
+      if (data?.success) {
         toast({
           title: "Post Saved",
-          description: "The post has been saved as a draft with hero image and author",
+          description: "The post has been saved as a draft with all fields populated",
         });
         queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
         navigate(`/posts/${data.data.slug}`);
       } else {
         toast({
           title: "Save Failed",
-          description: data.error || "Failed to save post",
+          description: data?.error || "Failed to save post",
           variant: "destructive",
         });
       }
@@ -376,19 +407,22 @@ export default function AIGenerator() {
     },
   });
 
-  const handleDownloadImage = () => {
-    if (generatedImageUrl) {
-      const link = document.createElement("a");
-      link.href = generatedImageUrl;
-      link.download = "hero-image.png";
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
+  const handleGenerate = (data: AIFormValues) => {
+    setGeneratedPost(null);
+    setOptimizedImage(null);
+    setGenerationState({ step: "idle", progress: 0, message: "" });
+    generateCompleteMutation.mutate(data);
+  };
+
+  const handleDiscard = () => {
+    setGeneratedPost(null);
+    setOptimizedImage(null);
+    setGenerationState({ step: "idle", progress: 0, message: "" });
   };
 
   const repository = repoData?.data;
   const selectedLanguage = LANGUAGES.find(lang => lang.value === form.watch("language"));
+  const isGenerating = generationState.step !== "idle" && generationState.step !== "complete" && generationState.step !== "error";
 
   if (!repository) {
     return (
@@ -415,7 +449,7 @@ export default function AIGenerator() {
             AI Post Generator
           </h1>
           <p className="text-muted-foreground mt-1">
-            Generate blog posts using Google Gemini AI
+            Generate complete blog posts with one click
           </p>
         </div>
       </div>
@@ -423,7 +457,7 @@ export default function AIGenerator() {
       <div className="grid gap-6 lg:grid-cols-2">
         <div className="space-y-6">
           <Form {...form}>
-            <form onSubmit={form.handleSubmit((data) => generateMutation.mutate(data))} className="space-y-6">
+            <form onSubmit={form.handleSubmit(handleGenerate)} className="space-y-6">
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -440,7 +474,7 @@ export default function AIGenerator() {
                       <Check className="w-4 h-4 text-green-600" />
                       <AlertTitle className="text-green-700 dark:text-green-400">API Key Saved</AlertTitle>
                       <AlertDescription className="text-green-600 dark:text-green-500">
-                        Your Gemini API key is securely saved. You can generate content without re-entering it.
+                        Your Gemini API key is securely saved.
                       </AlertDescription>
                     </Alert>
                   ) : null}
@@ -460,7 +494,7 @@ export default function AIGenerator() {
                         </FormControl>
                         <FormDescription>
                           {keySaved 
-                            ? "Enter a new key to override the saved one, or leave empty to use saved key."
+                            ? "Enter a new key to override the saved one."
                             : <>Get your API key from{" "}
                               <a 
                                 href="https://aistudio.google.com/app/apikey" 
@@ -511,7 +545,7 @@ export default function AIGenerator() {
                         data-testid="button-save-key"
                       >
                         <Key className="w-4 h-4 mr-1" />
-                        {saveKeyMutation.isPending ? "Saving..." : "Save for Future Sessions"}
+                        {saveKeyMutation.isPending ? "Saving..." : "Save Key"}
                       </Button>
                     )}
                   </div>
@@ -687,22 +721,49 @@ export default function AIGenerator() {
                       )}
                     />
                   </div>
+
+                  <div className="flex items-center justify-between border rounded-md p-3 bg-muted/30">
+                    <div className="space-y-0.5">
+                      <label className="text-sm font-medium flex items-center gap-2">
+                        <Image className="w-4 h-4" />
+                        Auto-generate Hero Image
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        Automatically create and optimize a hero image
+                      </p>
+                    </div>
+                    <Switch
+                      checked={generateWithImage}
+                      onCheckedChange={setGenerateWithImage}
+                      data-testid="switch-auto-image"
+                    />
+                  </div>
                 </CardContent>
               </Card>
 
               <Button
                 type="submit"
                 className="w-full"
-                disabled={generateMutation.isPending}
+                disabled={isGenerating}
                 data-testid="button-generate"
               >
-                {generateMutation.isPending ? (
+                {isGenerating ? (
                   <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
                 ) : (
-                  <Sparkles className="w-4 h-4 mr-2" />
+                  <Zap className="w-4 h-4 mr-2" />
                 )}
-                Generate Blog Post
+                {isGenerating ? generationState.message : "Generate Complete Post"}
               </Button>
+
+              {isGenerating && (
+                <div className="space-y-2">
+                  <Progress value={generationState.progress} className="h-2" />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{generationState.message}</span>
+                    <span>{generationState.progress}%</span>
+                  </div>
+                </div>
+              )}
             </form>
           </Form>
         </div>
@@ -711,25 +772,23 @@ export default function AIGenerator() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold">Preview</h2>
             {generatedPost && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowPreview(!showPreview)}
-                >
-                  {showPreview ? (
-                    <>
-                      <Edit className="w-4 h-4 mr-2" />
-                      View Raw
-                    </>
-                  ) : (
-                    <>
-                      <Eye className="w-4 h-4 mr-2" />
-                      Preview
-                    </>
-                  )}
-                </Button>
-              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowPreview(!showPreview)}
+              >
+                {showPreview ? (
+                  <>
+                    <Edit className="w-4 h-4 mr-2" />
+                    View Raw
+                  </>
+                ) : (
+                  <>
+                    <Eye className="w-4 h-4 mr-2" />
+                    Preview
+                  </>
+                )}
+              </Button>
             )}
           </div>
 
@@ -737,61 +796,80 @@ export default function AIGenerator() {
             <CardContent className="p-6">
               {generatedPost ? (
                 <div className="space-y-4">
+                  {optimizedImage && (
+                    <div className="border rounded-md overflow-hidden">
+                      <img
+                        src={optimizedImage.dataUrl}
+                        alt="Generated hero"
+                        className="w-full h-auto"
+                        data-testid="img-generated-hero"
+                      />
+                      <div className="p-2 bg-muted/50 text-xs text-muted-foreground flex items-center justify-between gap-2 flex-wrap">
+                        <span>Optimized: {formatBytes(optimizedImage.originalSize)} → {formatBytes(optimizedImage.optimizedSize)}</span>
+                        <Badge variant="secondary">{optimizedImage.compressionRatio}% smaller</Badge>
+                      </div>
+                    </div>
+                  )}
+
                   <div>
                     <h3 className="text-xl font-bold">{generatedPost.title}</h3>
                     <p className="text-muted-foreground mt-1">{generatedPost.description}</p>
-                    <div className="flex gap-2 mt-3 flex-wrap">
-                      {generatedPost.tags.map(tag => (
-                        <Badge key={tag} variant="secondary">{tag}</Badge>
-                      ))}
-                    </div>
+                  </div>
+
+                  <div className="flex gap-2 flex-wrap items-center">
+                    {generatedPost.category && (
+                      <Badge variant="default" className="flex items-center gap-1">
+                        <FolderOpen className="w-3 h-3" />
+                        {generatedPost.category}
+                      </Badge>
+                    )}
+                    {generatedPost.tags.map(tag => (
+                      <Badge key={tag} variant="secondary">{tag}</Badge>
+                    ))}
                   </div>
 
                   <div className="flex flex-col gap-3 pt-4 border-t">
-                    <div className="flex gap-3">
-                      <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending} data-testid="button-save-generated">
+                    <div className="flex gap-3 flex-wrap">
+                      <Button 
+                        onClick={() => saveMutation.mutate()} 
+                        disabled={saveMutation.isPending} 
+                        data-testid="button-save-generated"
+                      >
                         {saveMutation.isPending ? (
                           <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
                         ) : (
                           <Check className="w-4 h-4 mr-2" />
                         )}
-                        {saveMutation.isPending 
-                          ? (generatedImageUrl ? "Uploading image & saving..." : "Saving...")
-                          : "Save as Draft"
-                        }
+                        {saveMutation.isPending ? "Saving..." : "Save as Draft"}
                       </Button>
-                      <Button variant="outline" onClick={() => {
-                        setGeneratedPost(null);
-                        setGeneratedImageUrl(null);
-                        setImagePrompt("");
-                      }}>
+                      <Button variant="outline" onClick={handleDiscard}>
                         <X className="w-4 h-4 mr-2" />
                         Discard
                       </Button>
                     </div>
-                    {generatedImageUrl && (
-                      <p className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Check className="w-3 h-3 text-green-500" />
-                        Hero image ready - will be uploaded automatically when saving
-                      </p>
-                    )}
-                    {authData?.data?.user && (
-                      <p className="text-xs text-muted-foreground">
-                        Author: {authData.data.user.name || authData.data.user.login}
-                      </p>
-                    )}
-                  </div>
-
-                  {generatedPost.heroImage && (
-                    <div className="border rounded-md p-3 bg-muted/50">
-                      <p className="text-sm font-medium mb-1">Suggested Hero Image:</p>
-                      <p className="text-sm text-muted-foreground">{generatedPost.heroImage}</p>
-                      {generatedPost.heroImageAlt && (
-                        <p className="text-xs text-muted-foreground mt-1">Alt: {generatedPost.heroImageAlt}</p>
+                    
+                    <div className="text-xs text-muted-foreground space-y-1">
+                      {optimizedImage && (
+                        <p className="flex items-center gap-1">
+                          <Check className="w-3 h-3 text-green-500" />
+                          Hero image ready (optimized)
+                        </p>
+                      )}
+                      {generatedPost.category && (
+                        <p className="flex items-center gap-1">
+                          <Check className="w-3 h-3 text-green-500" />
+                          Category: {generatedPost.category}
+                        </p>
+                      )}
+                      {authData?.data?.user && (
+                        <p className="flex items-center gap-1">
+                          <Check className="w-3 h-3 text-green-500" />
+                          Author: {authData.data.user.name || authData.data.user.login}
+                        </p>
                       )}
                     </div>
-                  )}
-                  
+                  </div>
+
                   <div className="border-t pt-4">
                     {showPreview ? (
                       <div className="prose prose-sm dark:prose-invert max-w-none">
@@ -809,82 +887,23 @@ export default function AIGenerator() {
                   <div className="text-center text-muted-foreground">
                     <Sparkles className="w-12 h-12 mx-auto mb-4 opacity-50" />
                     <p>Generated content will appear here</p>
+                    <p className="text-sm mt-2">
+                      {generateWithImage 
+                        ? "Post + optimized hero image in one click"
+                        : "Post content only"
+                      }
+                    </p>
                   </div>
                 </div>
               )}
             </CardContent>
           </Card>
 
-          {generatedPost && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Image className="w-5 h-5" />
-                  Generate Hero Image
-                </CardTitle>
-                <CardDescription>
-                  Create an AI-generated hero image for your post
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Image Prompt</label>
-                  <Textarea
-                    placeholder="Describe the image you want to generate..."
-                    rows={3}
-                    value={imagePrompt}
-                    onChange={(e) => setImagePrompt(e.target.value)}
-                    data-testid="input-image-prompt"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Customize the prompt or use the suggested one based on your content
-                  </p>
-                </div>
-
-                <Button
-                  onClick={() => generateImageMutation.mutate(imagePrompt)}
-                  disabled={isGeneratingImage || !imagePrompt.trim()}
-                  className="w-full"
-                  data-testid="button-generate-image"
-                >
-                  {isGeneratingImage ? (
-                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                  ) : (
-                    <Image className="w-4 h-4 mr-2" />
-                  )}
-                  {isGeneratingImage ? "Generating..." : "Generate Image"}
-                </Button>
-
-                {generatedImageUrl && (
-                  <div className="space-y-3">
-                    <div className="border rounded-md overflow-hidden">
-                      <img
-                        src={generatedImageUrl}
-                        alt="Generated hero image"
-                        className="w-full h-auto"
-                        data-testid="img-generated-hero"
-                      />
-                    </div>
-                    <Button
-                      variant="outline"
-                      onClick={handleDownloadImage}
-                      className="w-full"
-                      data-testid="button-download-image"
-                    >
-                      <Download className="w-4 h-4 mr-2" />
-                      Download Image
-                    </Button>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
           <Alert>
-            <AlertCircle className="w-4 h-4" />
-            <AlertTitle>Note</AlertTitle>
+            <Zap className="w-4 h-4" />
+            <AlertTitle>Seamless Generation</AlertTitle>
             <AlertDescription>
-              Generated content is saved as a draft. You can review and edit it before publishing.
+              One click generates everything: title, content, description, tags, category, author, and {generateWithImage ? "optimized hero image" : "suggested hero image description"}.
             </AlertDescription>
           </Alert>
         </div>
