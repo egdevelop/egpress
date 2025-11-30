@@ -193,26 +193,26 @@ export default function Branding() {
           icon: s.logo?.icon || s.icon || "" 
         },
         seo: {
-          title: s.seo?.title || s.title || "",
-          description: s.seo?.description || s.description || "",
-          ogImage: s.seo?.ogImage || s.ogImage || "",
-          twitterHandle: s.seo?.twitterHandle || s.twitterHandle || "",
+          title: s.seo?.defaultTitle || s.seo?.title || "",
+          description: s.seo?.defaultDescription || s.seo?.description || "",
+          ogImage: s.seo?.defaultImage || s.seo?.ogImage || "",
+          twitterHandle: s.seo?.twitterHandle || "",
         },
         social: {
-          github: s.social?.github || s.github || "",
-          twitter: s.social?.twitter || s.twitter || "",
-          facebook: s.social?.facebook || s.facebook || "",
-          instagram: s.social?.instagram || s.instagram || "",
+          github: s.social?.github || "",
+          twitter: s.social?.twitter || "",
+          facebook: s.social?.facebook || "",
+          instagram: s.social?.instagram || "",
         },
         contact: {
-          email: s.contact?.email || s.email || "",
-          address: s.contact?.address || s.address || "",
+          email: s.contact?.email || "",
+          address: s.contact?.address || "",
         },
         features: {
-          enableSearch: s.features?.enableSearch ?? s.enableSearch ?? true,
-          showTags: s.features?.showTags ?? s.showTags ?? true,
-          enableRSS: s.features?.enableRSS ?? s.enableRSS ?? true,
-          enableSitemap: s.features?.enableSitemap ?? s.enableSitemap ?? true,
+          enableSearch: s.features?.enableSearch ?? true,
+          showTags: s.features?.showTags ?? true,
+          enableRSS: s.features?.enableRSS ?? true,
+          enableSitemap: s.features?.enableSitemap ?? true,
         },
       });
     }
@@ -251,8 +251,17 @@ export default function Branding() {
   // New template save mutation
   const saveNewMutation = useMutation({
     mutationFn: async (data: NewBrandingFormValues) => {
+      const transformedData = {
+        ...data,
+        seo: {
+          defaultTitle: data.seo.title,
+          defaultDescription: data.seo.description,
+          defaultImage: data.seo.ogImage,
+          twitterHandle: data.seo.twitterHandle,
+        },
+      };
       const response = await apiRequest("PUT", "/api/site-settings", {
-        siteSettings: data,
+        siteSettings: transformedData,
         commitMessage: "Update site branding and settings",
       });
       return response.json();
