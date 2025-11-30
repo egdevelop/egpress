@@ -44,6 +44,7 @@ import {
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { getGitHubImageUrl } from "@/lib/utils";
 import type { Post, Repository } from "@shared/schema";
 
 type SortOption = "date-desc" | "date-asc" | "title-asc" | "title-desc";
@@ -51,18 +52,24 @@ type FilterOption = "all" | "published" | "draft";
 
 function PostCard({ 
   post, 
-  onDelete 
+  onDelete,
+  repoFullName,
+  branch,
 }: { 
   post: Post; 
   onDelete: (slug: string) => void;
+  repoFullName?: string;
+  branch?: string;
 }) {
+  const imageUrl = getGitHubImageUrl(post.heroImage, repoFullName, branch || "main");
+  
   return (
     <Card className="group hover-elevate">
       <CardContent className="p-4">
         <div className="flex items-start gap-4">
-          {post.heroImage ? (
+          {imageUrl ? (
             <img 
-              src={post.heroImage} 
+              src={imageUrl} 
               alt={post.title}
               className="w-24 h-24 rounded-md object-cover shrink-0"
             />
@@ -321,6 +328,8 @@ export default function Posts() {
                   key={post.path} 
                   post={post} 
                   onDelete={setDeleteSlug}
+                  repoFullName={repository?.fullName}
+                  branch={repository?.activeBranch}
                 />
               ))}
             </div>

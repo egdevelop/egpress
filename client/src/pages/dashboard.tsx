@@ -22,6 +22,7 @@ import {
   Github
 } from "lucide-react";
 import { Link } from "wouter";
+import { getGitHubImageUrl } from "@/lib/utils";
 import type { Post, Repository } from "@shared/schema";
 
 function StatCard({ 
@@ -59,13 +60,15 @@ function StatCard({
   );
 }
 
-function RecentPostCard({ post }: { post: Post }) {
+function RecentPostCard({ post, repoFullName, branch }: { post: Post; repoFullName?: string; branch?: string }) {
+  const imageUrl = getGitHubImageUrl(post.heroImage, repoFullName, branch || "main");
+  
   return (
     <Link href={`/posts/${post.slug}`}>
       <div className="flex items-start gap-4 p-4 rounded-lg hover-elevate cursor-pointer border border-border/50">
-        {post.heroImage ? (
+        {imageUrl ? (
           <img 
-            src={post.heroImage} 
+            src={imageUrl} 
             alt={post.title}
             className="w-16 h-16 rounded-md object-cover"
           />
@@ -387,7 +390,12 @@ export default function Dashboard() {
                 ) : recentPosts.length > 0 ? (
                   <div className="space-y-3">
                     {recentPosts.map(post => (
-                      <RecentPostCard key={post.path} post={post} />
+                      <RecentPostCard 
+                        key={post.path} 
+                        post={post} 
+                        repoFullName={repository?.fullName}
+                        branch={repository?.activeBranch}
+                      />
                     ))}
                   </div>
                 ) : (
