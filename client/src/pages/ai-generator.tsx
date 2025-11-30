@@ -45,7 +45,9 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { Sparkles, Key, FileText, RefreshCw, Eye, Edit, X, Check, AlertCircle, ChevronsUpDown, Image, Zap, FolderOpen } from "lucide-react";
+import { Sparkles, Key, FileText, RefreshCw, Eye, Edit, X, Check, AlertCircle, ChevronsUpDown, Image, Zap, FolderOpen, Plus, Trash2, Layers, Play, Pause, CheckCircle2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import ReactMarkdown from "react-markdown";
@@ -170,6 +172,23 @@ interface OptimizedImageData {
   compressionRatio: number;
 }
 
+interface BulkQueueItem {
+  id: string;
+  topic: string;
+  keywords: string;
+  status: "pending" | "generating" | "completed" | "error";
+  error?: string;
+  postSlug?: string;
+}
+
+interface BulkGenerationState {
+  isRunning: boolean;
+  currentIndex: number;
+  totalItems: number;
+  completedCount: number;
+  errorCount: number;
+}
+
 export default function AIGenerator() {
   const [, navigate] = useLocation();
   const [generatedPost, setGeneratedPost] = useState<GeneratedPost | null>(null);
@@ -182,6 +201,22 @@ export default function AIGenerator() {
     step: "idle",
     progress: 0,
     message: "",
+  });
+  const [activeTab, setActiveTab] = useState<"single" | "bulk">("single");
+  const [bulkQueue, setBulkQueue] = useState<BulkQueueItem[]>([]);
+  const [bulkNewTopic, setBulkNewTopic] = useState("");
+  const [bulkNewKeywords, setBulkNewKeywords] = useState("");
+  const [bulkTone, setBulkTone] = useState<"professional" | "casual" | "technical" | "creative">("professional");
+  const [bulkLength, setBulkLength] = useState<"short" | "medium" | "long">("medium");
+  const [bulkLanguage, setBulkLanguage] = useState("indonesian");
+  const [bulkLanguageOpen, setBulkLanguageOpen] = useState(false);
+  const [bulkWithImage, setBulkWithImage] = useState(true);
+  const [bulkState, setBulkState] = useState<BulkGenerationState>({
+    isRunning: false,
+    currentIndex: 0,
+    totalItems: 0,
+    completedCount: 0,
+    errorCount: 0,
   });
   const { toast } = useToast();
 
@@ -439,8 +474,194 @@ export default function AIGenerator() {
     setGenerationState({ step: "idle", progress: 0, message: "" });
   };
 
+  const addToBulkQueue = () => {
+    if (!bulkNewTopic.trim()) {
+      toast({
+        title: "Topic Required",
+        description: "Please enter a topic for the post",
+        variant: "destructive",
+      });
+      return;
+    }
+    const newItem: BulkQueueItem = {
+      id: Date.now().toString(),
+      topic: bulkNewTopic.trim(),
+      keywords: bulkNewKeywords.trim(),
+      status: "pending",
+    };
+    setBulkQueue(prev => [...prev, newItem]);
+    setBulkNewTopic("");
+    setBulkNewKeywords("");
+  };
+
+  const removeFromBulkQueue = (id: string) => {
+    setBulkQueue(prev => prev.filter(item => item.id !== id));
+  };
+
+  const clearBulkQueue = () => {
+    setBulkQueue([]);
+    setBulkState({
+      isRunning: false,
+      currentIndex: 0,
+      totalItems: 0,
+      completedCount: 0,
+      errorCount: 0,
+    });
+  };
+
+  const generateSingleBulkPost = async (item: BulkQueueItem): Promise<{ success: boolean; slug?: string; error?: string }> => {
+    const authorName = authData?.data?.user?.name || authData?.data?.user?.login || "Author";
+    const keywords = item.keywords.split(",").map(k => k.trim()).filter(k => k);
+    
+    try {
+      const postResponse = await apiRequest("POST", "/api/ai/generate", {
+        useSavedKey: keySaved,
+        topic: item.topic,
+        keywords,
+        tone: bulkTone,
+        length: bulkLength,
+        language: bulkLanguage,
+      });
+      const postResult = await postResponse.json();
+      
+      if (!postResult.success) {
+        return { success: false, error: postResult.error || "Failed to generate post" };
+      }
+      
+      const generatedPostData = postResult.data as GeneratedPost;
+      
+      const slug = generatedPostData.title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-|-$/g, "");
+      
+      let heroImagePath: string | undefined;
+      
+      if (bulkWithImage && generatedPostData.heroImage) {
+        try {
+          const imageResponse = await apiRequest("POST", "/api/ai/generate-image", {
+            prompt: generatedPostData.heroImage,
+            useSavedKey: keySaved,
+          });
+          const imageResult = await imageResponse.json();
+          
+          if (imageResult.success && imageResult.data?.imageUrl) {
+            const optimized = await base64ToOptimizedBase64(imageResult.data.imageUrl, "image/png", {
+              maxWidth: 1200,
+              maxHeight: 800,
+              quality: 0.85,
+              format: "webp",
+            });
+            
+            const uploadResponse = await apiRequest("POST", "/api/upload-image-base64", {
+              imageData: optimized.dataUrl,
+              mimeType: optimized.mimeType,
+              filename: slug,
+            });
+            const uploadResult = await uploadResponse.json();
+            
+            if (uploadResult.success && uploadResult.path) {
+              heroImagePath = uploadResult.path;
+            }
+          }
+        } catch (imgErr) {
+          console.error("Image generation/upload failed for bulk post:", imgErr);
+        }
+      }
+      
+      const response = await apiRequest("POST", "/api/posts", {
+        slug,
+        title: generatedPostData.title,
+        description: generatedPostData.description,
+        pubDate: new Date().toISOString(),
+        tags: generatedPostData.tags,
+        category: generatedPostData.category,
+        draft: false,
+        featured: true,
+        content: generatedPostData.content,
+        heroImage: heroImagePath,
+        author: authorName,
+        commitMessage: `Add AI-generated post: ${generatedPostData.title}`,
+      });
+      const saveResult = await response.json();
+      
+      if (saveResult.success) {
+        return { success: true, slug: saveResult.data.slug };
+      } else {
+        return { success: false, error: saveResult.error || "Failed to save post" };
+      }
+    } catch (err: any) {
+      return { success: false, error: err.message || "Unknown error" };
+    }
+  };
+
+  const startBulkGeneration = async () => {
+    if (bulkQueue.length === 0) {
+      toast({
+        title: "Queue Empty",
+        description: "Add topics to the queue first",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    if (!keySaved) {
+      toast({
+        title: "API Key Required",
+        description: "Please save your Gemini API key first",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setBulkState({
+      isRunning: true,
+      currentIndex: 0,
+      totalItems: bulkQueue.length,
+      completedCount: 0,
+      errorCount: 0,
+    });
+    
+    setBulkQueue(prev => prev.map(item => ({ ...item, status: "pending" as const, error: undefined, postSlug: undefined })));
+    
+    for (let i = 0; i < bulkQueue.length; i++) {
+      const item = bulkQueue[i];
+      
+      setBulkQueue(prev => prev.map((q, idx) => 
+        idx === i ? { ...q, status: "generating" as const } : q
+      ));
+      
+      setBulkState(prev => ({ ...prev, currentIndex: i }));
+      
+      const result = await generateSingleBulkPost(item);
+      
+      if (result.success) {
+        setBulkQueue(prev => prev.map((q, idx) => 
+          idx === i ? { ...q, status: "completed" as const, postSlug: result.slug } : q
+        ));
+        setBulkState(prev => ({ ...prev, completedCount: prev.completedCount + 1 }));
+      } else {
+        setBulkQueue(prev => prev.map((q, idx) => 
+          idx === i ? { ...q, status: "error" as const, error: result.error } : q
+        ));
+        setBulkState(prev => ({ ...prev, errorCount: prev.errorCount + 1 }));
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+    
+    setBulkState(prev => ({ ...prev, isRunning: false }));
+    queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+    
+    toast({
+      title: "Bulk Generation Complete",
+      description: `Generated ${bulkState.completedCount + 1} posts successfully`,
+    });
+  };
+
   const repository = repoData?.data;
   const selectedLanguage = LANGUAGES.find(lang => lang.value === form.watch("language"));
+  const selectedBulkLanguage = LANGUAGES.find(lang => lang.value === bulkLanguage);
   const isGenerating = generationState.step !== "idle" && generationState.step !== "complete" && generationState.step !== "error";
 
   if (!repository) {
@@ -468,14 +689,27 @@ export default function AIGenerator() {
             AI Post Generator
           </h1>
           <p className="text-muted-foreground mt-1">
-            Generate complete blog posts with one click
+            Generate complete blog posts with AI
           </p>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <div className="space-y-6">
-          <Form {...form}>
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "single" | "bulk")}>
+        <TabsList className="mb-4">
+          <TabsTrigger value="single" className="gap-2" data-testid="tab-single">
+            <FileText className="w-4 h-4" />
+            Single Post
+          </TabsTrigger>
+          <TabsTrigger value="bulk" className="gap-2" data-testid="tab-bulk">
+            <Layers className="w-4 h-4" />
+            Bulk Generate
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="single">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-6">
+              <Form {...form}>
             <form onSubmit={form.handleSubmit(handleGenerate)} className="space-y-6">
               <Card>
                 <CardHeader>
@@ -927,6 +1161,342 @@ export default function AIGenerator() {
           </Alert>
         </div>
       </div>
+    </TabsContent>
+
+    <TabsContent value="bulk">
+          <div className="grid gap-6 lg:grid-cols-2">
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Key className="w-5 h-5" />
+                    API Status
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {keySaved ? (
+                    <Alert className="border-green-500/50 bg-green-50 dark:bg-green-950/20">
+                      <Check className="w-4 h-4 text-green-600" />
+                      <AlertTitle className="text-green-700 dark:text-green-400">API Key Ready</AlertTitle>
+                      <AlertDescription className="text-green-600 dark:text-green-500">
+                        Your Gemini API key is saved and ready for bulk generation.
+                      </AlertDescription>
+                    </Alert>
+                  ) : (
+                    <Alert variant="destructive">
+                      <AlertCircle className="w-4 h-4" />
+                      <AlertTitle>API Key Required</AlertTitle>
+                      <AlertDescription>
+                        Please save your Gemini API key in the Single Post tab first.
+                      </AlertDescription>
+                    </Alert>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    Bulk Settings
+                  </CardTitle>
+                  <CardDescription>
+                    Settings apply to all posts in the queue
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex flex-col space-y-2">
+                    <label className="text-sm font-medium">Language</label>
+                    <Popover open={bulkLanguageOpen} onOpenChange={setBulkLanguageOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          role="combobox"
+                          aria-expanded={bulkLanguageOpen}
+                          className="w-full justify-between"
+                          data-testid="select-bulk-language"
+                        >
+                          {selectedBulkLanguage ? (
+                            <span className="flex items-center gap-2">
+                              <span>{selectedBulkLanguage.label}</span>
+                              <span className="text-muted-foreground">({selectedBulkLanguage.native})</span>
+                            </span>
+                          ) : (
+                            "Select language..."
+                          )}
+                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-[300px] p-0" align="start">
+                        <Command>
+                          <CommandInput placeholder="Search language..." />
+                          <CommandList>
+                            <CommandEmpty>No language found.</CommandEmpty>
+                            <CommandGroup>
+                              {LANGUAGES.map((language) => (
+                                <CommandItem
+                                  key={language.value}
+                                  value={`${language.label} ${language.native}`}
+                                  onSelect={() => {
+                                    setBulkLanguage(language.value);
+                                    setBulkLanguageOpen(false);
+                                  }}
+                                >
+                                  <Check
+                                    className={cn(
+                                      "mr-2 h-4 w-4",
+                                      bulkLanguage === language.value ? "opacity-100" : "opacity-0"
+                                    )}
+                                  />
+                                  <span className="flex-1">{language.label}</span>
+                                  <span className="text-muted-foreground text-sm">{language.native}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div className="flex flex-col space-y-2">
+                      <label className="text-sm font-medium">Tone</label>
+                      <Select value={bulkTone} onValueChange={(v) => setBulkTone(v as typeof bulkTone)}>
+                        <SelectTrigger data-testid="select-bulk-tone">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="professional">Professional</SelectItem>
+                          <SelectItem value="casual">Casual</SelectItem>
+                          <SelectItem value="technical">Technical</SelectItem>
+                          <SelectItem value="creative">Creative</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex flex-col space-y-2">
+                      <label className="text-sm font-medium">Length</label>
+                      <Select value={bulkLength} onValueChange={(v) => setBulkLength(v as typeof bulkLength)}>
+                        <SelectTrigger data-testid="select-bulk-length">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="short">Short</SelectItem>
+                          <SelectItem value="medium">Medium</SelectItem>
+                          <SelectItem value="long">Long</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between border rounded-md p-3 bg-muted/30">
+                    <div className="space-y-0.5">
+                      <label className="text-sm font-medium flex items-center gap-2">
+                        <Image className="w-4 h-4" />
+                        Auto-generate Hero Images
+                      </label>
+                      <p className="text-xs text-muted-foreground">
+                        Generate and optimize hero image for each post
+                      </p>
+                    </div>
+                    <Switch
+                      checked={bulkWithImage}
+                      onCheckedChange={setBulkWithImage}
+                      data-testid="switch-bulk-image"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Plus className="w-5 h-5" />
+                    Add to Queue
+                  </CardTitle>
+                  <CardDescription>
+                    Add topics to generate multiple posts
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Topic</label>
+                    <Textarea
+                      placeholder="e.g., How to build a REST API with Node.js"
+                      value={bulkNewTopic}
+                      onChange={(e) => setBulkNewTopic(e.target.value)}
+                      rows={2}
+                      data-testid="input-bulk-topic"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Keywords (Optional)</label>
+                    <Input
+                      placeholder="nodejs, api, backend"
+                      value={bulkNewKeywords}
+                      onChange={(e) => setBulkNewKeywords(e.target.value)}
+                      data-testid="input-bulk-keywords"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    onClick={addToBulkQueue}
+                    className="w-full"
+                    disabled={bulkState.isRunning}
+                    data-testid="button-add-to-queue"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add to Queue
+                  </Button>
+                </CardContent>
+              </Card>
+            </div>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <h2 className="text-lg font-semibold flex items-center gap-2">
+                  <Layers className="w-5 h-5" />
+                  Queue ({bulkQueue.length} items)
+                </h2>
+                {bulkQueue.length > 0 && !bulkState.isRunning && (
+                  <Button variant="outline" size="sm" onClick={clearBulkQueue} data-testid="button-clear-queue">
+                    <Trash2 className="w-4 h-4 mr-1" />
+                    Clear All
+                  </Button>
+                )}
+              </div>
+
+              <Card className="min-h-[400px]">
+                <CardContent className="p-4">
+                  {bulkQueue.length > 0 ? (
+                    <ScrollArea className="h-[350px]">
+                      <div className="space-y-3">
+                        {bulkQueue.map((item, index) => (
+                          <div
+                            key={item.id}
+                            className={cn(
+                              "p-3 rounded-md border",
+                              item.status === "generating" && "border-primary bg-primary/5",
+                              item.status === "completed" && "border-green-500/50 bg-green-50 dark:bg-green-950/20",
+                              item.status === "error" && "border-red-500/50 bg-red-50 dark:bg-red-950/20",
+                              item.status === "pending" && "border-border"
+                            )}
+                            data-testid={`queue-item-${index}`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <Badge variant="outline" className="text-xs">
+                                    #{index + 1}
+                                  </Badge>
+                                  {item.status === "generating" && (
+                                    <Badge variant="default" className="text-xs gap-1">
+                                      <RefreshCw className="w-3 h-3 animate-spin" />
+                                      Generating
+                                    </Badge>
+                                  )}
+                                  {item.status === "completed" && (
+                                    <Badge variant="default" className="text-xs gap-1 bg-green-600">
+                                      <CheckCircle2 className="w-3 h-3" />
+                                      Published
+                                    </Badge>
+                                  )}
+                                  {item.status === "error" && (
+                                    <Badge variant="destructive" className="text-xs gap-1">
+                                      <AlertCircle className="w-3 h-3" />
+                                      Failed
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="text-sm font-medium truncate">{item.topic}</p>
+                                {item.keywords && (
+                                  <p className="text-xs text-muted-foreground truncate mt-1">
+                                    Keywords: {item.keywords}
+                                  </p>
+                                )}
+                                {item.error && (
+                                  <p className="text-xs text-red-500 mt-1">{item.error}</p>
+                                )}
+                                {item.postSlug && (
+                                  <Button
+                                    variant="link"
+                                    size="sm"
+                                    className="h-auto p-0 text-xs mt-1"
+                                    onClick={() => navigate(`/posts/${item.postSlug}`)}
+                                  >
+                                    View Post
+                                  </Button>
+                                )}
+                              </div>
+                              {item.status === "pending" && !bulkState.isRunning && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => removeFromBulkQueue(item.id)}
+                                  data-testid={`button-remove-${index}`}
+                                >
+                                  <X className="w-4 h-4" />
+                                </Button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </ScrollArea>
+                  ) : (
+                    <div className="flex items-center justify-center h-[350px]">
+                      <div className="text-center text-muted-foreground">
+                        <Layers className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                        <p>Queue is empty</p>
+                        <p className="text-sm mt-2">Add topics to start bulk generation</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {bulkState.isRunning && (
+                <div className="space-y-2">
+                  <Progress value={(bulkState.currentIndex / bulkState.totalItems) * 100} className="h-2" />
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>Processing {bulkState.currentIndex + 1} of {bulkState.totalItems}</span>
+                    <span>{Math.round((bulkState.currentIndex / bulkState.totalItems) * 100)}%</span>
+                  </div>
+                </div>
+              )}
+
+              <Button
+                className="w-full"
+                size="lg"
+                onClick={startBulkGeneration}
+                disabled={bulkQueue.length === 0 || bulkState.isRunning || !keySaved}
+                data-testid="button-start-bulk"
+              >
+                {bulkState.isRunning ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Generating... ({bulkState.completedCount}/{bulkState.totalItems})
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 mr-2" />
+                    Generate All ({bulkQueue.length} posts)
+                  </>
+                )}
+              </Button>
+
+              <Alert>
+                <Zap className="w-4 h-4" />
+                <AlertTitle>Bulk Generation</AlertTitle>
+                <AlertDescription>
+                  All posts will be automatically published and marked as featured.
+                  {bulkWithImage ? " Each post will include an optimized hero image." : ""}
+                </AlertDescription>
+              </Alert>
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }
