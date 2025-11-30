@@ -88,6 +88,15 @@ The system comprises a React-based frontend and an Express.js backend.
   - All fields auto-filled: title, content, description, tags, category, author, and optimized hero image
   - Toggle for image generation: Option to skip image generation if not needed
   - Image stats display: Shows original vs optimized size with compression ratio
+- **Performance Page (New):**
+  - Image Optimization tab with compression presets (Aggressive/Balanced/Quality/Custom)
+  - Batch image optimizer: drag-drop multiple images, process in queue, download all optimized
+  - Custom compression settings: quality slider (10-100%), max dimensions, format selection (WebP/JPEG/PNG)
+  - Real-time compression stats showing original vs optimized size and savings
+  - Smart Deploy tab with deployment strategy guidance
+  - Deployment batching toggle for efficient Vercel builds
+  - Step-by-step deployment workflow: bulk create → review → single deploy
+  - Vercel auto-deploy control instructions and ignored build step configuration
 
 ## External Dependencies
 
