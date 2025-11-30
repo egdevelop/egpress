@@ -1,8 +1,9 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Upload, X, Image as ImageIcon, Loader2 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 
 interface ImageUploadProps {
@@ -25,8 +26,36 @@ export function ImageUpload({
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [persistentPreview, setPersistentPreview] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  const { data: repoData } = useQuery<{ success: boolean; data: { fullName: string; activeBranch: string } }>({
+    queryKey: ["/api/repository"],
+  });
+
+  const getGitHubRawUrl = useCallback((path: string) => {
+    if (!path || !repoData?.data?.fullName) return null;
+    if (path.startsWith("http://") || path.startsWith("https://")) return path;
+    
+    const cleanPath = path.startsWith("/image/") 
+      ? `public${path}` 
+      : path.startsWith("public/") 
+        ? path 
+        : `public/image/${path}`;
+    
+    const branch = repoData.data.activeBranch || "main";
+    return `https://raw.githubusercontent.com/${repoData.data.fullName}/${branch}/${cleanPath}`;
+  }, [repoData]);
+
+  useEffect(() => {
+    if (value && !previewUrl) {
+      const rawUrl = getGitHubRawUrl(value);
+      if (rawUrl) {
+        setPersistentPreview(rawUrl);
+      }
+    }
+  }, [value, previewUrl, getGitHubRawUrl]);
 
   const handleUpload = useCallback(async (file: File) => {
     if (!file) return;
@@ -72,6 +101,11 @@ export function ImageUpload({
       }
 
       onChange(result.path);
+      
+      const rawUrl = getGitHubRawUrl(result.path);
+      if (rawUrl) {
+        setPersistentPreview(rawUrl);
+      }
       setPreviewUrl(null);
 
       toast({
@@ -127,6 +161,7 @@ export function ImageUpload({
   const handleClear = useCallback(() => {
     onChange("");
     setPreviewUrl(null);
+    setPersistentPreview(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
@@ -138,7 +173,7 @@ export function ImageUpload({
     }
   }, [isUploading]);
 
-  const displayImage = previewUrl || value;
+  const displayImage = previewUrl || persistentPreview || (value?.startsWith("http") ? value : null);
 
   return (
     <div className={cn("space-y-2", className)} data-testid="image-upload">
