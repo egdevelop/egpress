@@ -51,6 +51,7 @@ import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useTheme } from "@/lib/theme-context";
+import { ImageUpload } from "@/components/image-upload";
 import type { Post, Repository } from "@shared/schema";
 
 const postFormSchema = z.object({
@@ -481,15 +482,18 @@ export default function PostEditor() {
                           <FormItem>
                             <FormLabel className="flex items-center gap-2">
                               <ImageIcon className="w-4 h-4" />
-                              Hero Image URL
+                              Hero Image
                             </FormLabel>
                             <FormControl>
-                              <Input 
-                                placeholder="https://..."
-                                {...field}
+                              <ImageUpload
+                                value={field.value || ""}
+                                onChange={field.onChange}
                                 data-testid="input-hero-image"
                               />
                             </FormControl>
+                            <FormDescription>
+                              Upload a featured image for your post
+                            </FormDescription>
                             <FormMessage />
                           </FormItem>
                         )}
