@@ -50,6 +50,7 @@ export const postSchema = z.object({
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
   draft: z.boolean().optional(),
+  featured: z.boolean().optional(),
   content: z.string(),
   // Store raw frontmatter to preserve original structure
   rawFrontmatter: z.record(z.any()).optional(),

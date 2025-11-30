@@ -64,6 +64,7 @@ const postFormSchema = z.object({
   category: z.string().optional(),
   tags: z.array(z.string()).optional(),
   draft: z.boolean().optional(),
+  featured: z.boolean().optional(),
   content: z.string().min(1, "Content is required"),
 });
 
@@ -169,6 +170,7 @@ export default function PostEditor() {
       category: "",
       tags: [],
       draft: true,
+      featured: false,
       content: "# Hello World\n\nStart writing your blog post here...",
     },
   });
@@ -189,6 +191,7 @@ export default function PostEditor() {
         category: post.category || "",
         tags: post.tags || [],
         draft: post.draft ?? false,
+        featured: post.featured ?? false,
         content: post.content,
       });
       setCommitMessage(`Update post: ${post.title}`);
@@ -535,6 +538,28 @@ export default function PostEditor() {
                                 checked={field.value}
                                 onCheckedChange={field.onChange}
                                 data-testid="switch-draft"
+                              />
+                            </FormControl>
+                          </FormItem>
+                        )}
+                      />
+
+                      <FormField
+                        control={form.control}
+                        name="featured"
+                        render={({ field }) => (
+                          <FormItem className="flex items-center justify-between rounded-lg border p-4">
+                            <div className="space-y-0.5">
+                              <FormLabel>Featured Post</FormLabel>
+                              <FormDescription>
+                                Display this post in the featured section on homepage
+                              </FormDescription>
+                            </div>
+                            <FormControl>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                                data-testid="switch-featured"
                               />
                             </FormControl>
                           </FormItem>

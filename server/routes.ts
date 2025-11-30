@@ -171,6 +171,7 @@ function parsePost(path: string, content: string): Post | null {
       category: data.category || "",
       tags: Array.isArray(data.tags) ? data.tags : [],
       draft: data.draft === true,
+      featured: data.featured === true,
       content: markdown,
       // Store raw frontmatter to preserve original structure when saving
       rawFrontmatter,
@@ -259,6 +260,13 @@ function generatePostContent(post: Omit<Post, "path">, originalFrontmatter?: Rec
     frontmatter.draft = true;
   } else {
     delete frontmatter.draft;
+  }
+  
+  // Handle featured - only include if true
+  if (post.featured) {
+    frontmatter.featured = true;
+  } else {
+    delete frontmatter.featured;
   }
 
   // Use yaml library for proper formatting
@@ -1017,11 +1025,11 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const { slug, title, description, pubDate, heroImage, author, category, tags, draft, content, commitMessage } = req.body;
+      const { slug, title, description, pubDate, heroImage, author, category, tags, draft, featured, content, commitMessage } = req.body;
       
       const path = `src/content/blog/${slug}.md`;
       const fileContent = generatePostContent({
-        slug, title, description, pubDate, heroImage, author, category, tags, draft, content
+        slug, title, description, pubDate, heroImage, author, category, tags, draft, featured, content
       });
 
       const octokit = await getGitHubClient();
@@ -1044,6 +1052,7 @@ export async function registerRoutes(
       if (category && category.trim()) newRawFrontmatter.category = category;
       if (tags && tags.length > 0) newRawFrontmatter.tags = tags;
       if (draft) newRawFrontmatter.draft = true;
+      if (featured) newRawFrontmatter.featured = true;
 
       const newPost: Post = {
         path, slug, title, 
@@ -1053,7 +1062,8 @@ export async function registerRoutes(
         author: author || undefined,
         category: category || "", 
         tags: tags || [], 
-        draft: draft || false, 
+        draft: draft || false,
+        featured: featured || false, 
         content,
         rawFrontmatter: newRawFrontmatter,
       };
@@ -1083,11 +1093,11 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Post not found" });
       }
 
-      const { title, description, pubDate, heroImage, author, category, tags, draft, content, commitMessage } = req.body;
+      const { title, description, pubDate, heroImage, author, category, tags, draft, featured, content, commitMessage } = req.body;
       
       // Pass original frontmatter to preserve structure (author as object, custom fields)
       const fileContent = generatePostContent({
-        slug: req.params.slug, title, description, pubDate, heroImage, author, category, tags, draft, content
+        slug: req.params.slug, title, description, pubDate, heroImage, author, category, tags, draft, featured, content
       }, existingPost.rawFrontmatter);
 
       const octokit = await getGitHubClient();
@@ -1132,7 +1142,8 @@ export async function registerRoutes(
         author: newFrontmatter.author || existingPost.author,
         category: newFrontmatter.category || category || "",
         tags: newFrontmatter.tags || tags || [], 
-        draft: draft || false, 
+        draft: draft || false,
+        featured: featured || false, 
         content,
         rawFrontmatter: updatedRawFrontmatter,
       };
