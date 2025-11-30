@@ -188,32 +188,34 @@ export function AppSidebar() {
       const response = await apiRequest("POST", "/api/repository/connect", { url });
       return response.json();
     },
-    onSuccess: (data) => {
-      setConnectingRepoId(null);
+    onSuccess: async (data) => {
       if (data.success) {
-        toast({
-          title: "Repository Connected",
-          description: `Successfully connected to ${data.data.fullName}`,
-        });
-        
         // Show Vercel auto-link result if applicable
         if (data.vercelAutoLink) {
-          const { project, isNew, message } = data.vercelAutoLink;
+          const { isNew, message } = data.vercelAutoLink;
           toast({
             title: isNew ? "Vercel Project Created" : "Vercel Project Linked",
             description: message,
           });
-          // Invalidate Vercel queries
-          queryClient.invalidateQueries({ queryKey: ["/api/vercel/config"] });
-          queryClient.invalidateQueries({ queryKey: ["/api/vercel/projects"] });
         }
         
-        queryClient.invalidateQueries({ queryKey: ["/api/repository"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/files"] });
-        queryClient.invalidateQueries({ queryKey: ["/api/search-console/config"] });
+        // Invalidate ALL queries to force complete refetch
+        await queryClient.invalidateQueries();
+        
+        // Reset connecting state after queries are invalidated
+        setConnectingRepoId(null);
         setRepoSelectOpen(false);
+        setRepoManageOpen(false);
+        
+        toast({
+          title: "Repository Connected",
+          description: `Now managing ${data.data.fullName}`,
+        });
+        
+        // Navigate to dashboard to show fresh content
+        setLocationNav("/");
       } else {
+        setConnectingRepoId(null);
         toast({
           title: "Connection Failed",
           description: data.error || "Failed to connect repository",
@@ -298,6 +300,18 @@ export function AppSidebar() {
 
         {repository ? (
           <div className="space-y-2">
+            {connectMutation.isPending && (
+              <div className="flex items-center gap-3 p-3 rounded-md border-2 border-primary/50 bg-primary/5 w-full animate-pulse">
+                <div className="w-8 h-8 rounded-md bg-primary/20 flex items-center justify-center shrink-0">
+                  <RefreshCw className="w-4 h-4 text-primary animate-spin" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold">Switching repository...</p>
+                  <p className="text-xs text-muted-foreground">Loading content & settings</p>
+                </div>
+              </div>
+            )}
+            {!connectMutation.isPending && (
             <Popover open={repoManageOpen} onOpenChange={(open) => {
               setRepoManageOpen(open);
               if (!open) setShowChangeRepo(false);
@@ -424,6 +438,7 @@ export function AppSidebar() {
                 )}
               </PopoverContent>
             </Popover>
+            )}
 
             <AlertDialog open={disconnectDialogOpen} onOpenChange={setDisconnectDialogOpen}>
               <AlertDialogContent>
