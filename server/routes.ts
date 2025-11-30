@@ -1,6 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import crypto from "crypto";
+import multer from "multer";
 import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { VercelService } from "./vercel";
@@ -1253,6 +1254,120 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("Update file content error:", error);
       res.json({ success: false, error: error.message || "Failed to update file" });
+    }
+  });
+
+  // ============== IMAGE UPLOAD ==============
+  
+  // Configure multer for image uploads (memory storage, max 5MB)
+  const allowedImageTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+  const allowedExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+  
+  const imageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: 5 * 1024 * 1024, // 5MB max
+    },
+    fileFilter: (req, file, cb) => {
+      const ext = file.originalname.toLowerCase().substring(file.originalname.lastIndexOf('.'));
+      if (!allowedImageTypes.includes(file.mimetype) && !allowedExtensions.includes(ext)) {
+        return cb(new Error('Only image files are allowed (jpg, jpeg, png, gif, webp, svg)'));
+      }
+      cb(null, true);
+    },
+  });
+
+  // Upload image to GitHub repository
+  app.post("/api/upload-image", requireAuth, imageUpload.single('file'), async (req, res) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, error: "No file uploaded" });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.status(400).json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+      
+      // Get original filename and extension
+      let originalName = req.file.originalname;
+      const extIndex = originalName.lastIndexOf('.');
+      const baseName = extIndex > 0 ? originalName.substring(0, extIndex) : originalName;
+      const ext = extIndex > 0 ? originalName.substring(extIndex) : '';
+      
+      // Sanitize filename (remove special characters, spaces -> dashes)
+      const sanitizedBaseName = baseName
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+      
+      let finalFilename = `${sanitizedBaseName}${ext.toLowerCase()}`;
+      let filePath = `public/image/${finalFilename}`;
+      
+      // Check if file exists and add timestamp suffix if needed
+      let fileExists = true;
+      let attempts = 0;
+      while (fileExists && attempts < 10) {
+        try {
+          await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: filePath,
+            ref: repo.activeBranch,
+          });
+          // File exists, add timestamp suffix
+          const timestamp = Date.now();
+          const randomSuffix = crypto.randomBytes(3).toString('hex');
+          finalFilename = `${sanitizedBaseName}-${timestamp}-${randomSuffix}${ext.toLowerCase()}`;
+          filePath = `public/image/${finalFilename}`;
+          attempts++;
+        } catch (error: any) {
+          if (error.status === 404) {
+            // File doesn't exist, we can use this path
+            fileExists = false;
+          } else {
+            throw error;
+          }
+        }
+      }
+      
+      if (attempts >= 10) {
+        return res.status(500).json({ success: false, error: "Could not generate unique filename" });
+      }
+      
+      // Upload file to GitHub
+      const fileContent = req.file.buffer.toString('base64');
+      
+      await octokit.repos.createOrUpdateFileContents({
+        owner: repo.owner,
+        repo: repo.name,
+        path: filePath,
+        message: `Upload image: ${finalFilename}`,
+        content: fileContent,
+        branch: repo.activeBranch,
+      });
+      
+      // Return the public path (how it will be accessible after build)
+      const publicPath = `/image/${finalFilename}`;
+      
+      res.json({ 
+        success: true, 
+        path: publicPath,
+        fullPath: filePath,
+        filename: finalFilename,
+      });
+    } catch (error: any) {
+      console.error("Image upload error:", error);
+      
+      // Handle multer errors
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return res.status(400).json({ success: false, error: "File size exceeds 5MB limit" });
+      }
+      
+      res.status(500).json({ success: false, error: error.message || "Failed to upload image" });
     }
   });
 
