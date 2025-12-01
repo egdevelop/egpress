@@ -6332,7 +6332,7 @@ ${urls.map(url => `  <url>
   app.get("/api/smart-deploy/queue", requireAuth, async (req, res) => {
     try {
       const queue = await storage.getDraftQueue();
-      res.json({ success: true, queue });
+      res.json({ success: true, data: queue });
     } catch (error: any) {
       res.json({ success: false, error: error.message });
     }
@@ -6429,6 +6429,17 @@ ${urls.map(url => `  <url>
       // Track processed paths to avoid duplicates
       const processedPaths = new Set<string>();
 
+      // Helper function to create blob for base64 content (images)
+      const createBlobForBase64 = async (base64Content: string): Promise<string> => {
+        const { data: blob } = await octokit.git.createBlob({
+          owner: repo.owner,
+          repo: repo.name,
+          content: base64Content,
+          encoding: "base64",
+        });
+        return blob.sha;
+      };
+
       for (const change of queue.changes) {
         // Handle new operations array format (for multi-file changes like image replace)
         if (change.operations && change.operations.length > 0) {
@@ -6444,12 +6455,26 @@ ${urls.map(url => `  <url>
                 sha: null,
               });
             } else if (op.type === "write" && op.content) {
-              treeEntries.push({
-                path: op.path,
-                mode: "100644",
-                type: "blob",
-                content: op.content,
-              });
+              // Check if content is base64 encoded (for images)
+              // Also detect by file extension as fallback for existing queue data
+              const isImagePath = /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(op.path);
+              const isBase64 = op.encoding === "base64" || isImagePath;
+              if (isBase64) {
+                const blobSha = await createBlobForBase64(op.content);
+                treeEntries.push({
+                  path: op.path,
+                  mode: "100644",
+                  type: "blob",
+                  sha: blobSha,
+                });
+              } else {
+                treeEntries.push({
+                  path: op.path,
+                  mode: "100644",
+                  type: "blob",
+                  content: op.content,
+                });
+              }
             }
           }
         } 
@@ -6467,12 +6492,27 @@ ${urls.map(url => `  <url>
         } else if (change.content) {
           if (!processedPaths.has(change.path)) {
             processedPaths.add(change.path);
-            treeEntries.push({
-              path: change.path,
-              mode: "100644",
-              type: "blob",
-              content: change.content,
-            });
+            // Check if this is an image upload - detect by type, metadata, or file extension
+            const isImageType = change.type?.startsWith("image_");
+            const hasMimeType = change.metadata?.mimeType;
+            const isImagePath = /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(change.path);
+            const isBase64 = isImageType || hasMimeType || isImagePath;
+            if (isBase64) {
+              const blobSha = await createBlobForBase64(change.content);
+              treeEntries.push({
+                path: change.path,
+                mode: "100644",
+                type: "blob",
+                sha: blobSha,
+              });
+            } else {
+              treeEntries.push({
+                path: change.path,
+                mode: "100644",
+                type: "blob",
+                content: change.content,
+              });
+            }
           }
         }
       }
