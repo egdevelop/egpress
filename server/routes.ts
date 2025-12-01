@@ -2461,8 +2461,12 @@ export async function registerRoutes(
         }
       }
 
-      // If queueOnly is true, add to draft queue instead of committing
-      if (queueOnly === true) {
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly === true || smartDeployActive;
+
+      // If queue mode, add to draft queue instead of committing
+      if (shouldQueue) {
         if (!cssUpdated) {
           return res.json({ 
             success: false, 
@@ -3589,8 +3593,12 @@ export async function registerRoutes(
 
       // Only process if content changed
       if (content !== originalContent) {
-        // If queueOnly is true, add to draft queue instead of committing
-        if (queueOnly === true) {
+        // Check if Smart Deploy is active - if so, force queue mode
+        const smartDeployActive = await isSmartDeployActive();
+        const shouldQueue = queueOnly === true || smartDeployActive;
+
+        // If queue mode, add to draft queue instead of committing
+        if (shouldQueue) {
           const draftChange: DraftChange = {
             id: crypto.randomUUID(),
             type: "settings_update",
@@ -3861,8 +3869,12 @@ export async function registerRoutes(
 
       // Only process if content changed
       if (content !== originalContent) {
-        // If queueOnly is true, add to draft queue instead of committing
-        if (queueOnly === true) {
+        // Check if Smart Deploy is active - if so, force queue mode
+        const smartDeployActive = await isSmartDeployActive();
+        const shouldQueue = queueOnly === true || smartDeployActive;
+
+        // If queue mode, add to draft queue instead of committing
+        if (shouldQueue) {
           const draftChange: DraftChange = {
             id: crypto.randomUUID(),
             type: "content_defaults_update",
