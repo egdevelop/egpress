@@ -407,10 +407,22 @@ export default function VercelPage() {
         return <Trash2 className="w-4 h-4 text-red-500" />;
       case "image_upload":
         return <ImageIcon className="w-4 h-4 text-purple-500" />;
+      case "image_replace":
+        return <ImageIcon className="w-4 h-4 text-orange-500" />;
+      case "image_delete":
+        return <ImageIcon className="w-4 h-4 text-red-500" />;
       case "theme_update":
         return <Palette className="w-4 h-4 text-orange-500" />;
       case "settings_update":
         return <Settings className="w-4 h-4 text-gray-500" />;
+      case "navigation_update":
+        return <Link2 className="w-4 h-4 text-cyan-500" />;
+      case "content_defaults_update":
+        return <File className="w-4 h-4 text-teal-500" />;
+      case "static_page_update":
+        return <FileText className="w-4 h-4 text-indigo-500" />;
+      case "file_update":
+        return <File className="w-4 h-4 text-gray-500" />;
       default:
         return <File className="w-4 h-4 text-gray-500" />;
     }
@@ -421,12 +433,39 @@ export default function VercelPage() {
       case "post_create": return "New Post";
       case "post_update": return "Edit Post";
       case "post_delete": return "Delete Post";
-      case "image_upload": return "Image";
+      case "image_upload": return "Image Upload";
+      case "image_replace": return "Image Replace";
+      case "image_delete": return "Image Delete";
       case "theme_update": return "Theme";
-      case "settings_update": return "Settings";
+      case "settings_update": return "Site Settings";
+      case "navigation_update": return "Navigation";
+      case "content_defaults_update": return "Content Defaults";
+      case "static_page_update": return "Static Page";
+      case "file_update": return "File";
       default: return "File";
     }
   };
+
+  // Get category for a change type (for grouping)
+  const getChangeCategory = (type: string): string => {
+    if (type.startsWith("post_")) return "Posts";
+    if (type.startsWith("image_")) return "Images";
+    if (type === "theme_update") return "Theme";
+    if (type === "settings_update" || type === "navigation_update" || type === "content_defaults_update") return "Settings";
+    if (type === "static_page_update") return "Pages";
+    return "Other";
+  };
+
+  // Group changes by category
+  const groupedChanges = (draftQueue?.changes || []).reduce((acc, change) => {
+    const category = getChangeCategory(change.type);
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(change);
+    return acc;
+  }, {} as Record<string, typeof draftQueue.changes>);
+
+  // Category order for display
+  const categoryOrder = ["Posts", "Images", "Theme", "Settings", "Pages", "Other"];
 
   const config = configData?.data;
   const project = config?.project;
@@ -1369,41 +1408,61 @@ export default function VercelPage() {
                           <p className="font-medium">No pending changes</p>
                           <p className="text-sm mt-1">
                             {smartDeploySettings?.enabled 
-                              ? "Use 'Save & Queue' when editing posts to queue changes here"
+                              ? "Use 'Save & Queue' on any page to queue changes here"
                               : "Enable Smart Deploy to start queuing changes"}
                           </p>
                         </div>
                       ) : (
                         <>
+                          {/* Category summary badges */}
+                          <div className="flex flex-wrap gap-2 pb-2">
+                            {categoryOrder.filter(cat => groupedChanges[cat]?.length > 0).map(category => (
+                              <Badge key={category} variant="secondary" className="text-xs gap-1">
+                                {category}
+                                <span className="font-bold">{groupedChanges[category].length}</span>
+                              </Badge>
+                            ))}
+                          </div>
+                          
                           <ScrollArea className="h-[300px] pr-4">
-                            <div className="space-y-2">
-                              {draftQueue?.changes.map((change) => (
-                                <div 
-                                  key={change.id}
-                                  className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/30"
-                                  data-testid={`queue-item-${change.id}`}
-                                >
-                                  <div className="flex items-center gap-3 min-w-0">
-                                    {getChangeTypeIcon(change.type)}
-                                    <div className="min-w-0">
-                                      <p className="font-medium text-sm truncate">{change.title}</p>
-                                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                        <Badge variant="outline" className="text-xs">
-                                          {getChangeTypeLabel(change.type)}
-                                        </Badge>
-                                        <span className="truncate">{change.path}</span>
+                            <div className="space-y-4">
+                              {categoryOrder.filter(cat => groupedChanges[cat]?.length > 0).map(category => (
+                                <div key={category}>
+                                  <h4 className="text-sm font-medium text-muted-foreground mb-2 flex items-center gap-2">
+                                    {category}
+                                    <Badge variant="outline" className="text-xs">{groupedChanges[category].length}</Badge>
+                                  </h4>
+                                  <div className="space-y-2">
+                                    {groupedChanges[category].map((change) => (
+                                      <div 
+                                        key={change.id}
+                                        className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/30"
+                                        data-testid={`queue-item-${change.id}`}
+                                      >
+                                        <div className="flex items-center gap-3 min-w-0">
+                                          {getChangeTypeIcon(change.type)}
+                                          <div className="min-w-0">
+                                            <p className="font-medium text-sm truncate">{change.title}</p>
+                                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                              <Badge variant="outline" className="text-xs">
+                                                {getChangeTypeLabel(change.type)}
+                                              </Badge>
+                                              <span className="truncate">{change.path}</span>
+                                            </div>
+                                          </div>
+                                        </div>
+                                        <Button
+                                          variant="ghost"
+                                          size="icon"
+                                          onClick={() => removeFromQueueMutation.mutate(change.id)}
+                                          disabled={removeFromQueueMutation.isPending}
+                                          data-testid={`button-remove-change-${change.id}`}
+                                        >
+                                          <X className="w-4 h-4" />
+                                        </Button>
                                       </div>
-                                    </div>
+                                    ))}
                                   </div>
-                                  <Button
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => removeFromQueueMutation.mutate(change.id)}
-                                    disabled={removeFromQueueMutation.isPending}
-                                    data-testid={`button-remove-change-${change.id}`}
-                                  >
-                                    <X className="w-4 h-4" />
-                                  </Button>
                                 </div>
                               ))}
                             </div>
@@ -1470,18 +1529,18 @@ export default function VercelPage() {
                           <div className="flex items-start gap-3">
                             <Badge variant="secondary" className="shrink-0">1</Badge>
                             <div>
-                              <p className="font-medium text-sm">Create Content</p>
+                              <p className="font-medium text-sm">Make Changes</p>
                               <p className="text-xs text-muted-foreground">
-                                When editing posts, use "Save & Queue" instead of regular save
+                                Use "Save & Queue" on any page (posts, theme, settings, pages)
                               </p>
                             </div>
                           </div>
                           <div className="flex items-start gap-3">
                             <Badge variant="secondary" className="shrink-0">2</Badge>
                             <div>
-                              <p className="font-medium text-sm">Queue Changes</p>
+                              <p className="font-medium text-sm">Queue All Changes</p>
                               <p className="text-xs text-muted-foreground">
-                                All changes are stored locally until you're ready to deploy
+                                Posts, images, theme, settings, and pages are all queued here
                               </p>
                             </div>
                           </div>

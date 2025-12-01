@@ -28,6 +28,13 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { ImageUpload } from "@/components/image-upload";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   Palette, 
   Globe, 
@@ -39,11 +46,13 @@ import {
   Mail,
   Settings2,
   Share2,
-  Image as ImageIcon
+  Image as ImageIcon,
+  ChevronDown,
+  Clock,
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository } from "@shared/schema";
+import type { Repository, SmartDeploySettings } from "@shared/schema";
 
 const legacyBrandingFormSchema = z.object({
   siteName: z.string().min(1, "Site name is required"),
@@ -160,6 +169,12 @@ export default function Branding() {
     queryKey: ["/api/branding"],
     enabled: !!repoData?.data && !isNewTemplate,
   });
+
+  const { data: smartDeployData } = useQuery<{ success: boolean; settings: SmartDeploySettings }>({
+    queryKey: ["/api/smart-deploy/settings"],
+  });
+
+  const smartDeployEnabled = smartDeployData?.settings?.enabled ?? false;
 
   const isLoading = isNewTemplate ? siteSettingsLoading : legacyLoading;
 
@@ -374,6 +389,53 @@ export default function Branding() {
     },
   });
 
+  const queueNewMutation = useMutation({
+    mutationFn: async (data: NewBrandingFormValues) => {
+      const keywordsArray = data.seo.keywords
+        .split(",")
+        .map(k => k.trim())
+        .filter(k => k.length > 0);
+      
+      const transformedData = {
+        ...data,
+        seo: {
+          ...data.seo,
+          keywords: keywordsArray,
+        },
+      };
+      
+      const response = await apiRequest("PUT", "/api/site-settings", {
+        siteSettings: transformedData,
+        commitMessage: "Update site branding and settings",
+        queueOnly: true,
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Added to Queue",
+          description: `${data.queueCount || 1} pending change${(data.queueCount || 1) > 1 ? 's' : ''} - go to Vercel page to deploy`,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/smart-deploy/queue"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/site-settings"] });
+      } else {
+        toast({
+          title: "Queue Failed",
+          description: data.error || "Failed to queue settings change",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Queue Failed",
+        description: "An error occurred while queuing",
+        variant: "destructive",
+      });
+    },
+  });
+
   const repository = repoData?.data;
 
   if (!repository) {
@@ -414,18 +476,54 @@ export default function Branding() {
               <Badge variant="secondary" className="text-xs" data-testid="badge-template-type">egpress-v1</Badge>
             </div>
           </div>
-          <Button
-            onClick={newForm.handleSubmit((data) => saveNewMutation.mutate(data))}
-            disabled={saveNewMutation.isPending}
-            data-testid="button-save-site-settings"
-          >
-            {saveNewMutation.isPending ? (
-              <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <Save className="w-4 h-4 mr-2" />
-            )}
-            Save to GitHub
-          </Button>
+          {smartDeployEnabled ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  disabled={saveNewMutation.isPending || queueNewMutation.isPending}
+                  data-testid="button-save-dropdown"
+                >
+                  {(saveNewMutation.isPending || queueNewMutation.isPending) ? (
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  ) : (
+                    <Save className="w-4 h-4 mr-2" />
+                  )}
+                  Save
+                  <ChevronDown className="w-4 h-4 ml-2" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={newForm.handleSubmit((data) => saveNewMutation.mutate(data))}
+                  data-testid="menu-item-save-changes"
+                >
+                  <Save className="w-4 h-4 mr-2" />
+                  Save Changes
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={newForm.handleSubmit((data) => queueNewMutation.mutate(data))}
+                  data-testid="menu-item-save-queue"
+                >
+                  <Clock className="w-4 h-4 mr-2" />
+                  Save & Queue
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : (
+            <Button
+              onClick={newForm.handleSubmit((data) => saveNewMutation.mutate(data))}
+              disabled={saveNewMutation.isPending}
+              data-testid="button-save-site-settings"
+            >
+              {saveNewMutation.isPending ? (
+                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4 mr-2" />
+              )}
+              Save to GitHub
+            </Button>
+          )}
         </div>
 
         <Form {...newForm}>

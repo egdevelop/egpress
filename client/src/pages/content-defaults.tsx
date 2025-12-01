@@ -8,6 +8,13 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   Navigation, 
   Home, 
@@ -18,11 +25,14 @@ import {
   Trash2,
   GripVertical,
   ExternalLink,
-  Link2
+  Link2,
+  ChevronDown,
+  Clock,
+  GitCommit,
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository } from "@shared/schema";
+import type { Repository, SmartDeploySettings } from "@shared/schema";
 
 interface NavItem {
   href: string;
@@ -114,6 +124,12 @@ export default function ContentDefaultsPage() {
     enabled: !!repoData?.data && isNewTemplate,
   });
 
+  const { data: smartDeployData } = useQuery<{ success: boolean; settings: SmartDeploySettings }>({
+    queryKey: ["/api/smart-deploy/settings"],
+  });
+
+  const smartDeployEnabled = smartDeployData?.settings?.enabled ?? false;
+
   useEffect(() => {
     if (contentDefaultsData?.data && isNewTemplate) {
       const data = contentDefaultsData.data;
@@ -173,6 +189,41 @@ export default function ContentDefaultsPage() {
     },
   });
 
+  const queueMutation = useMutation({
+    mutationFn: async (data: ContentDefaults) => {
+      const response = await apiRequest("PUT", "/api/content-defaults", {
+        contentDefaults: data,
+        commitMessage: "Update content defaults",
+        queueOnly: true,
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Added to Queue",
+          description: "Changes queued for batch deploy - go to Vercel page to deploy",
+        });
+        setHasChanges(false);
+        queryClient.invalidateQueries({ queryKey: ["/api/smart-deploy/queue"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/content-defaults"] });
+      } else {
+        toast({
+          title: "Queue Failed",
+          description: data.error || "Failed to queue changes",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Queue Failed",
+        description: "An error occurred while queuing",
+        variant: "destructive",
+      });
+    },
+  });
+
   const updateFormData = (updates: Partial<ContentDefaults>) => {
     setFormData(prev => ({ ...prev, ...updates }));
     setHasChanges(true);
@@ -180,6 +231,10 @@ export default function ContentDefaultsPage() {
 
   const handleSave = () => {
     saveMutation.mutate(formData);
+  };
+
+  const handleQueue = () => {
+    queueMutation.mutate(formData);
   };
 
   if (!repoData?.data) {
@@ -230,14 +285,69 @@ export default function ContentDefaultsPage() {
           <h1 className="text-2xl font-bold" data-testid="text-page-title">Content Defaults</h1>
           <p className="text-muted-foreground">Manage navigation, homepage, blog settings, and categories</p>
         </div>
-        <Button 
-          onClick={handleSave} 
-          disabled={saveMutation.isPending || !hasChanges}
-          data-testid="button-save"
-        >
-          <Save className="w-4 h-4 mr-2" />
-          {saveMutation.isPending ? "Saving..." : "Save Changes"}
-        </Button>
+        {smartDeployEnabled ? (
+          <div className="flex">
+            <Button
+              onClick={handleSave}
+              disabled={saveMutation.isPending || queueMutation.isPending || !hasChanges}
+              className="rounded-r-none"
+              data-testid="button-save"
+            >
+              {saveMutation.isPending ? (
+                <>
+                  <GitCommit className="w-4 h-4 mr-2 animate-pulse" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save & Commit
+                </>
+              )}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="default"
+                  size="icon"
+                  className="rounded-l-none border-l border-l-primary-foreground/20"
+                  disabled={saveMutation.isPending || queueMutation.isPending || !hasChanges}
+                  data-testid="button-save-dropdown"
+                >
+                  <ChevronDown className="w-4 h-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onClick={handleSave}
+                  disabled={saveMutation.isPending}
+                  data-testid="menu-save-commit"
+                >
+                  <GitCommit className="w-4 h-4 mr-2" />
+                  Save & Commit Now
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onClick={handleQueue}
+                  disabled={queueMutation.isPending}
+                  data-testid="menu-save-queue"
+                >
+                  <Clock className="w-4 h-4 mr-2" />
+                  {queueMutation.isPending ? "Queuing..." : "Save & Queue for Batch Deploy"}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        ) : (
+          <Button 
+            onClick={handleSave} 
+            disabled={saveMutation.isPending || !hasChanges}
+            data-testid="button-save"
+          >
+            <Save className="w-4 h-4 mr-2" />
+            {saveMutation.isPending ? "Saving..." : "Save Changes"}
+          </Button>
+        )}
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">

@@ -8,6 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   Palette, 
   RotateCcw, 
@@ -17,10 +24,13 @@ import {
   Square,
   Layers,
   RefreshCw,
+  GitCommit,
+  Clock,
+  ChevronDown,
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository } from "@shared/schema";
+import type { Repository, SmartDeploySettings } from "@shared/schema";
 
 interface DesignTokensColors {
   primary: string;
@@ -337,6 +347,12 @@ export default function ThemePage() {
     enabled: !!repoData?.data && isNewTemplate,
   });
 
+  const { data: smartDeployData } = useQuery<{ success: boolean; settings: SmartDeploySettings }>({
+    queryKey: ["/api/smart-deploy/settings"],
+  });
+
+  const smartDeployEnabled = smartDeployData?.settings?.enabled ?? false;
+
   useEffect(() => {
     if (isNewTemplate && siteSettingsData?.data?.designTokens) {
       const tokens = siteSettingsData.data.designTokens;
@@ -377,6 +393,42 @@ export default function ThemePage() {
       toast({
         title: "Save Failed",
         description: "Failed to save design tokens",
+        variant: "destructive",
+      });
+    },
+  });
+
+  const queueMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("PUT", "/api/site-settings", {
+        designTokens,
+        commitMessage,
+        queueOnly: true,
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data?.success) {
+        toast({
+          title: "Added to Queue",
+          description: data.queueCount 
+            ? `${data.queueCount} pending change${data.queueCount > 1 ? 's' : ''} - go to Vercel page to deploy`
+            : "Changes queued for batch deploy",
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/smart-deploy/queue"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/site-settings"] });
+      } else {
+        toast({
+          title: "Queue Failed",
+          description: data?.error || "Failed to queue changes",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Queue Failed",
+        description: "An error occurred while queuing",
         variant: "destructive",
       });
     },
@@ -538,24 +590,79 @@ export default function ThemePage() {
             <RotateCcw className="w-4 h-4 mr-2" />
             Reset
           </Button>
-          <Button
-            size="sm"
-            onClick={handleSave}
-            disabled={saveMutation.isPending || !hasChanges}
-            data-testid="button-save"
-          >
-            {saveMutation.isPending ? (
-              <>
-                <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4 mr-2" />
-                Save to GitHub
-              </>
-            )}
-          </Button>
+          {smartDeployEnabled ? (
+            <div className="flex">
+              <Button
+                size="sm"
+                onClick={handleSave}
+                disabled={saveMutation.isPending || queueMutation.isPending || !hasChanges}
+                className="rounded-r-none"
+                data-testid="button-save"
+              >
+                {saveMutation.isPending ? (
+                  <>
+                    <GitCommit className="w-4 h-4 mr-2 animate-pulse" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    Save & Commit
+                  </>
+                )}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    className="rounded-l-none border-l border-l-primary-foreground/20 px-2"
+                    disabled={saveMutation.isPending || queueMutation.isPending || !hasChanges}
+                    data-testid="button-save-dropdown"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={handleSave}
+                    disabled={saveMutation.isPending}
+                    data-testid="menu-save-commit"
+                  >
+                    <GitCommit className="w-4 h-4 mr-2" />
+                    Save & Commit Now
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={() => queueMutation.mutate()}
+                    disabled={queueMutation.isPending}
+                    data-testid="menu-save-queue"
+                  >
+                    <Clock className="w-4 h-4 mr-2" />
+                    {queueMutation.isPending ? "Queuing..." : "Save & Queue for Batch Deploy"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleSave}
+              disabled={saveMutation.isPending || !hasChanges}
+              data-testid="button-save"
+            >
+              {saveMutation.isPending ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Save to GitHub
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 
