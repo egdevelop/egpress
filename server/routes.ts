@@ -5303,23 +5303,54 @@ ${urls.map(url => `  <url>
         sha?: string | null;
       }> = [];
 
+      // Track processed paths to avoid duplicates
+      const processedPaths = new Set<string>();
+
       for (const change of queue.changes) {
-        if (change.type === "post_delete") {
-          // For deletions, set sha to null to remove the file
-          treeEntries.push({
-            path: change.path,
-            mode: "100644",
-            type: "blob",
-            sha: null,
-          });
+        // Handle new operations array format (for multi-file changes like image replace)
+        if (change.operations && change.operations.length > 0) {
+          for (const op of change.operations) {
+            if (processedPaths.has(op.path)) continue;
+            processedPaths.add(op.path);
+            
+            if (op.type === "delete") {
+              treeEntries.push({
+                path: op.path,
+                mode: "100644",
+                type: "blob",
+                sha: null,
+              });
+            } else if (op.type === "write" && op.content) {
+              treeEntries.push({
+                path: op.path,
+                mode: "100644",
+                type: "blob",
+                content: op.content,
+              });
+            }
+          }
+        } 
+        // Handle legacy single-file format
+        else if (change.type === "post_delete" || change.type === "image_delete") {
+          if (!processedPaths.has(change.path)) {
+            processedPaths.add(change.path);
+            treeEntries.push({
+              path: change.path,
+              mode: "100644",
+              type: "blob",
+              sha: null,
+            });
+          }
         } else if (change.content) {
-          // For creates/updates, add the new content
-          treeEntries.push({
-            path: change.path,
-            mode: "100644",
-            type: "blob",
-            content: change.content,
-          });
+          if (!processedPaths.has(change.path)) {
+            processedPaths.add(change.path);
+            treeEntries.push({
+              path: change.path,
+              mode: "100644",
+              type: "blob",
+              content: change.content,
+            });
+          }
         }
       }
 

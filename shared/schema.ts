@@ -318,21 +318,37 @@ export const draftChangeTypeSchema = z.enum([
   "post_delete",
   "settings_update",
   "theme_update",
+  "navigation_update",
+  "content_defaults_update",
+  "static_page_update",
   "image_upload",
+  "image_replace",
+  "image_delete",
   "file_update",
 ]);
 
 export type DraftChangeType = z.infer<typeof draftChangeTypeSchema>;
+
+// File operation for batch commits
+export const fileOperationSchema = z.object({
+  type: z.enum(["write", "delete"]),
+  path: z.string(),
+  content: z.string().optional(), // Base64 encoded for binary, plain text for markdown
+  encoding: z.enum(["utf-8", "base64"]).default("utf-8"),
+});
+
+export type FileOperation = z.infer<typeof fileOperationSchema>;
 
 // Individual draft change item
 export const draftChangeSchema = z.object({
   id: z.string(),
   type: draftChangeTypeSchema,
   title: z.string(), // Human-readable description
-  path: z.string(), // File path affected
-  content: z.string().optional(), // New content (for creates/updates)
+  path: z.string(), // Primary file path affected (for display)
+  content: z.string().optional(), // New content (for simple single-file changes)
   previousContent: z.string().optional(), // Previous content (for showing diff)
-  metadata: z.record(z.any()).optional(), // Additional data (e.g., commit message)
+  operations: z.array(fileOperationSchema).optional(), // Multiple file operations (write/delete)
+  metadata: z.record(z.any()).optional(), // Additional data (e.g., commit message, previousPath for image replace)
   createdAt: z.string(), // ISO timestamp
 });
 
