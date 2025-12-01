@@ -1513,6 +1513,44 @@ export async function registerRoutes(
       
       // Upload file to GitHub
       const fileContent = req.file.buffer.toString('base64');
+      const publicPath = `/image/${finalFilename}`;
+      
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      
+      if (smartDeployActive) {
+        // Queue the image upload
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: "image_upload",
+          title: `Upload image: ${finalFilename}`,
+          path: filePath,
+          content: fileContent,
+          operations: [
+            {
+              type: "write",
+              path: filePath,
+              content: fileContent,
+              encoding: "base64",
+            },
+          ],
+          metadata: {
+            publicPath,
+            mimeType: req.file.mimetype,
+          },
+          createdAt: new Date().toISOString(),
+        };
+        
+        await storage.addDraftChange(draftChange);
+        
+        return res.json({ 
+          success: true, 
+          path: publicPath,
+          fullPath: filePath,
+          filename: finalFilename,
+          queued: true,
+        });
+      }
       
       await octokit.repos.createOrUpdateFileContents({
         owner: repo.owner,
@@ -1522,9 +1560,6 @@ export async function registerRoutes(
         content: fileContent,
         branch: repo.activeBranch,
       });
-      
-      // Return the public path (how it will be accessible after build)
-      const publicPath = `/image/${finalFilename}`;
       
       res.json({ 
         success: true, 
@@ -2591,6 +2626,34 @@ export async function registerRoutes(
       const configContent = JSON.stringify(config, null, 2);
       const path = "src/config/site.json";
 
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = req.body.queueOnly === true || smartDeployActive;
+
+      if (shouldQueue) {
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: "settings_update",
+          title: "Update site configuration",
+          path,
+          content: configContent,
+          operations: [
+            {
+              type: "write",
+              path,
+              content: configContent,
+              encoding: "utf-8",
+            },
+          ],
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+        await storage.setSiteConfig(config);
+
+        return res.json({ success: true, data: config, queued: true });
+      }
+
       const octokit = await getGitHubClient();
 
       let sha: string | undefined;
@@ -2707,7 +2770,7 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const { siteName, logoLetter, description, socialLinks } = req.body;
+      const { siteName, logoLetter, description, socialLinks, queueOnly } = req.body;
       const octokit = await getGitHubClient();
 
       // Get current Header.astro
@@ -2742,81 +2805,127 @@ export async function registerRoutes(
         }
       } catch {}
 
-      // Update Header.astro
+      // Prepare updated content
+      let updatedHeaderContent = headerContent;
+      let updatedFooterContent = footerContent;
+
+      // Update Header.astro content
       if (headerContent && siteName) {
-        // Update site name in header
-        headerContent = headerContent.replace(
+        updatedHeaderContent = headerContent.replace(
           /(<span class="text-xl font-bold[^"]*">)[^<]+(<\/span>)/g,
           `$1${siteName}$2`
         );
-        // Update logo letter
         if (logoLetter) {
-          headerContent = headerContent.replace(
+          updatedHeaderContent = updatedHeaderContent.replace(
             /(<span class="text-white font-bold[^"]*">)[^<]+(<\/span>)/g,
             `$1${logoLetter}$2`
           );
         }
-
-        await octokit.repos.createOrUpdateFileContents({
-          owner: repo.owner,
-          repo: repo.name,
-          path: "src/components/Header.astro",
-          message: "Update Header branding",
-          content: Buffer.from(headerContent).toString("base64"),
-          sha: headerSha,
-          branch: repo.activeBranch,
-        });
       }
 
-      // Update Footer.astro
+      // Update Footer.astro content
       if (footerContent) {
-        // Update site name in footer
+        updatedFooterContent = footerContent;
         if (siteName) {
-          footerContent = footerContent.replace(
+          updatedFooterContent = updatedFooterContent.replace(
             /(<span class="text-xl font-bold text-white">)[^<]+(<\/span>)/g,
             `$1${siteName}$2`
           );
-          // Update copyright
-          footerContent = footerContent.replace(
+          updatedFooterContent = updatedFooterContent.replace(
             /(&copy; \{currentYear\} )[^.]+(\. All rights reserved\.)/g,
             `$1${siteName}$2`
           );
         }
-        // Update description
         if (description !== undefined) {
-          footerContent = footerContent.replace(
+          updatedFooterContent = updatedFooterContent.replace(
             /(<p class="text-sm text-gray-400 mb-4">)\s*[^<]+(<\/p>)/,
             `$1\n          ${description}\n        $2`
           );
         }
-        // Update social links
         if (socialLinks) {
           if (socialLinks.twitter) {
-            footerContent = footerContent.replace(
+            updatedFooterContent = updatedFooterContent.replace(
               /(\{\s*href:\s*['"])[^'"]+(['"],\s*label:\s*['"]Twitter['"])/,
               `$1${socialLinks.twitter}$2`
             );
           }
           if (socialLinks.linkedin) {
-            footerContent = footerContent.replace(
+            updatedFooterContent = updatedFooterContent.replace(
               /(\{\s*href:\s*['"])[^'"]+(['"],\s*label:\s*['"]LinkedIn['"])/,
               `$1${socialLinks.linkedin}$2`
             );
           }
           if (socialLinks.facebook) {
-            footerContent = footerContent.replace(
+            updatedFooterContent = updatedFooterContent.replace(
               /(\{\s*href:\s*['"])[^'"]+(['"],\s*label:\s*['"]Facebook['"])/,
               `$1${socialLinks.facebook}$2`
             );
           }
         }
+      }
 
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly === true || smartDeployActive;
+
+      if (shouldQueue) {
+        // Build operations array for batch commit
+        const operations: Array<{ type: "write" | "delete"; path: string; content?: string; encoding?: "utf-8" | "base64" }> = [];
+        
+        if (updatedHeaderContent !== headerContent) {
+          operations.push({
+            type: "write",
+            path: "src/components/Header.astro",
+            content: updatedHeaderContent,
+            encoding: "utf-8",
+          });
+        }
+        if (updatedFooterContent !== footerContent) {
+          operations.push({
+            type: "write",
+            path: "src/components/Footer.astro",
+            content: updatedFooterContent,
+            encoding: "utf-8",
+          });
+        }
+
+        if (operations.length > 0) {
+          const draftChange: DraftChange = {
+            id: crypto.randomUUID(),
+            type: "settings_update",
+            title: "Update branding",
+            path: "src/components/Header.astro",
+            content: updatedHeaderContent,
+            operations,
+            createdAt: new Date().toISOString(),
+          };
+
+          await storage.addDraftChange(draftChange);
+        }
+
+        return res.json({ success: true, queued: true });
+      }
+
+      // Immediate commit mode
+      if (updatedHeaderContent !== headerContent) {
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/components/Header.astro",
+          message: "Update Header branding",
+          content: Buffer.from(updatedHeaderContent).toString("base64"),
+          sha: headerSha,
+          branch: repo.activeBranch,
+        });
+      }
+
+      if (updatedFooterContent !== footerContent) {
         await octokit.repos.createOrUpdateFileContents({
           owner: repo.owner,
           repo: repo.name,
           path: "src/components/Footer.astro",
           message: "Update Footer branding",
-          content: Buffer.from(footerContent).toString("base64"),
+          content: Buffer.from(updatedFooterContent).toString("base64"),
           sha: footerSha,
           branch: repo.activeBranch,
         });
@@ -4014,6 +4123,34 @@ export async function registerRoutes(
       const configContent = JSON.stringify(config, null, 2);
       const path = "src/config/adsense.json";
 
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = req.body.queueOnly === true || smartDeployActive;
+
+      if (shouldQueue) {
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: "settings_update",
+          title: "Update AdSense configuration",
+          path,
+          content: configContent,
+          operations: [
+            {
+              type: "write",
+              path,
+              content: configContent,
+              encoding: "utf-8",
+            },
+          ],
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+        await storage.setAdsenseConfig(config);
+
+        return res.json({ success: true, data: config, queued: true });
+      }
+
       const octokit = await getGitHubClient();
 
       let sha: string | undefined;
@@ -4791,7 +4928,11 @@ export async function registerRoutes(
             // Rebuild the file
             const newContent = matter.default.stringify(body, frontmatter);
 
-            if (queueOnly === true) {
+            // Check if Smart Deploy is active - if so, force queue mode
+            const smartDeployActive = await isSmartDeployActive();
+            const shouldQueue = queueOnly === true || smartDeployActive;
+
+            if (shouldQueue) {
               operations.push({
                 type: "write",
                 path: postPath,
@@ -4817,8 +4958,12 @@ export async function registerRoutes(
         }
       }
 
-      // If queueOnly, add to Smart Deploy queue
-      if (queueOnly === true && operations.length > 0) {
+      // Check if Smart Deploy is active for final queue decision
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly === true || smartDeployActive;
+
+      // If should queue, add to Smart Deploy queue
+      if (shouldQueue && operations.length > 0) {
         const draftChange: any = {
           id: crypto.randomUUID(),
           type: "post_update",
@@ -4847,7 +4992,7 @@ export async function registerRoutes(
         data: {
           results,
           optimizedCount,
-          queued: queueOnly === true,
+          queued: shouldQueue,
         },
       });
     } catch (error: any) {
@@ -5976,7 +6121,32 @@ ${urls.map(url => `  <url>
   </url>`).join("\n")}
 </urlset>`;
 
-      // Commit sitemap to repository
+      // Check if Smart Deploy is active - if so, queue the sitemap update
+      const smartDeployActive = await isSmartDeployActive();
+      
+      if (smartDeployActive) {
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: "settings_update",
+          title: "Update sitemap.xml",
+          path: "public/sitemap.xml",
+          content: xml,
+          operations: [
+            {
+              type: "write",
+              path: "public/sitemap.xml",
+              content: xml,
+              encoding: "utf-8",
+            },
+          ],
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+        return res.json({ success: true, message: "Sitemap queued for deployment", queued: true });
+      }
+
+      // Commit sitemap to repository immediately
       const octokit = await getGitHubClient();
       
       // Check if sitemap exists
@@ -6086,6 +6256,43 @@ ${urls.map(url => `  <url>
     <priority>${url.priority}</priority>
   </url>`).join("\n")}
 </urlset>`;
+
+      // Check if Smart Deploy is active - if so, queue the sitemap update
+      const smartDeployActive = await isSmartDeployActive();
+      
+      if (smartDeployActive) {
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: "settings_update",
+          title: "Auto-generate sitemap.xml",
+          path: "public/sitemap.xml",
+          content: xml,
+          operations: [
+            {
+              type: "write",
+              path: "public/sitemap.xml",
+              content: xml,
+              encoding: "utf-8",
+            },
+          ],
+          metadata: {
+            urlCount: urls.length,
+            domain: baseUrl,
+          },
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+        
+        return res.json({ 
+          success: true, 
+          message: "Sitemap queued for deployment. Google submission will be available after deploying.",
+          queued: true,
+          repoSaved: false,
+          googleSubmitted: false,
+          urlCount: urls.length,
+        });
+      }
 
       // Check if sitemap exists
       let sha: string | undefined;
