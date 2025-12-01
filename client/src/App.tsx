@@ -8,6 +8,7 @@ import { AppSidebar } from "@/components/app-sidebar";
 import { ThemeProvider } from "@/lib/theme-context";
 import { AuthProvider, useAuth } from "@/lib/auth-context";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { SmartDeployStatus } from "@/components/smart-deploy-status";
 import Dashboard from "@/pages/dashboard";
 import Posts from "@/pages/posts";
 import PostEditor from "@/pages/post-editor";
@@ -80,7 +81,10 @@ function AuthenticatedApp() {
         <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
           <header className="flex items-center justify-between gap-4 p-2 border-b border-border shrink-0 bg-background sticky top-0 z-20">
             <SidebarTrigger data-testid="button-sidebar-toggle" />
-            <ThemeToggle />
+            <div className="flex items-center gap-2">
+              <SmartDeployStatus />
+              <ThemeToggle />
+            </div>
           </header>
           <main className="flex-1 overflow-auto">
             <Router />
