@@ -166,24 +166,29 @@ export default function PerformancePage() {
         const blob = await response.blob();
         const file = new File([blob], image.original.name, { type: blob.type });
         
-        const optimized = await optimizeImage(file, options);
+        const originalPath = image.original.path;
+        const originalExt = image.original.name.split('.').pop()?.toLowerCase() || 'webp';
+        
+        const mimeTypeMap: Record<string, 'image/png' | 'image/jpeg' | 'image/webp'> = {
+          'png': 'image/png',
+          'jpg': 'image/jpeg', 
+          'jpeg': 'image/jpeg',
+          'webp': 'image/webp',
+        };
+        const originalMimeType = mimeTypeMap[originalExt] || 'image/webp';
+        
+        const replacementOptions = {
+          ...options,
+          format: originalMimeType,
+        };
+        
+        const optimized = await optimizeImage(file, replacementOptions);
         
         if (optimized.optimizedSize >= image.original.size) {
           setProcessedImages(prev => prev.map(img =>
             img.id === image.id ? { ...img, status: 'skipped', error: 'Already optimized' } : img
           ));
         } else {
-          const originalPath = image.original.path;
-          const originalExt = image.original.name.split('.').pop() || 'webp';
-          
-          const mimeTypeMap: Record<string, string> = {
-            'png': 'image/png',
-            'jpg': 'image/jpeg', 
-            'jpeg': 'image/jpeg',
-            'webp': 'image/webp',
-            'gif': 'image/gif',
-          };
-          const mimeType = mimeTypeMap[originalExt.toLowerCase()] || 'image/webp';
 
           const base64 = optimized.dataUrl.split(',')[1];
           
@@ -193,7 +198,7 @@ export default function PerformancePage() {
             body: JSON.stringify({
               imageData: base64,
               filename: originalPath,
-              mimeType,
+              mimeType: originalMimeType,
               queueOnly: true,
               previousPath: originalPath,
             }),

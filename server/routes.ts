@@ -1560,21 +1560,37 @@ export async function registerRoutes(
       if (filename && filename.includes('/')) {
         // Security: sanitize path to prevent traversal attacks
         const sanitizedPath = filename
-          .replace(/\.\./g, '')           // Remove ..
+          .replace(/\.\.\//g, '')         // Remove ../
+          .replace(/\.\./g, '')           // Remove remaining ..
           .replace(/\/\//g, '/')          // Remove double slashes
-          .replace(/^\/+/, '');           // Remove leading slashes
+          .replace(/^\/+/, '')            // Remove leading slashes
+          .replace(/\\/g, '/');           // Normalize backslashes
         
-        // Ensure path stays within public/image directory for safety
-        if (!sanitizedPath.startsWith('public/image/') && !sanitizedPath.startsWith('image/')) {
+        // Build the full path and validate it stays within allowed directory
+        const normalizedPath = sanitizedPath.startsWith('public/') 
+          ? sanitizedPath 
+          : `public/${sanitizedPath}`;
+        
+        // Ensure the resolved path is strictly within public/image/
+        if (!normalizedPath.startsWith('public/image/')) {
           return res.status(400).json({ 
             success: false, 
             error: "Invalid image path - must be within public/image directory" 
           });
         }
         
-        // Filename contains a path - use it directly for replacement
-        filePath = sanitizedPath.startsWith('public/') ? sanitizedPath : `public/${sanitizedPath}`;
-        finalFilename = sanitizedPath.split('/').pop() || sanitizedPath;
+        // Ensure no traversal after the public/image prefix
+        const pathAfterPrefix = normalizedPath.substring('public/image/'.length);
+        if (pathAfterPrefix.includes('..') || pathAfterPrefix.startsWith('/')) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Invalid image path - path traversal detected" 
+          });
+        }
+        
+        // Use the validated path
+        filePath = normalizedPath;
+        finalFilename = pathAfterPrefix.split('/').pop() || pathAfterPrefix;
       } else {
         // Generate unique filename for new uploads
         const baseName = filename || `ai-hero-image`;
