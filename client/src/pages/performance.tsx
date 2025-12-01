@@ -176,7 +176,7 @@ export default function PerformancePage() {
           const mimeType = options.format || 'image/webp';
           const ext = mimeType === 'image/webp' ? 'webp' : mimeType === 'image/jpeg' ? 'jpg' : 'png';
           const originalName = image.original.name.replace(/\.[^.]+$/, '');
-          const newFilename = `${originalName}-optimized.${ext}`;
+          const optimizedFilename = `${originalName}.${ext}`;
 
           const base64 = optimized.dataUrl.split(',')[1];
           
@@ -185,8 +185,10 @@ export default function PerformancePage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               imageData: base64,
-              filename: newFilename,
+              filename: optimizedFilename,
               mimeType,
+              queueOnly: true,
+              previousPath: image.original.path,
             }),
             credentials: 'include',
           });
@@ -227,7 +229,7 @@ export default function PerformancePage() {
       
       let description = '';
       if (completedCount > 0) {
-        description += `Optimized ${completedCount} image${completedCount > 1 ? 's' : ''}`;
+        description += `Queued ${completedCount} optimized image${completedCount > 1 ? 's' : ''} for deploy`;
       }
       if (skippedCount > 0) {
         description += description ? ', ' : '';
@@ -237,6 +239,8 @@ export default function PerformancePage() {
         description += description ? ', ' : '';
         description += `${errorCount} failed`;
       }
+      
+      queryClient.invalidateQueries({ queryKey: ["/api/smart-deploy/queue"] });
       
       toast({
         title: "Optimization Complete",
