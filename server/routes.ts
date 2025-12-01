@@ -1521,7 +1521,7 @@ export async function registerRoutes(
   // Supports queueOnly mode for Smart Deploy and previousPath for replacing images
   app.post("/api/upload-image-base64", requireAuth, async (req, res) => {
     try {
-      const { imageData, mimeType, filename, queueOnly, previousPath } = req.body;
+      const { imageData, mimeType, filename, queueOnly, previousPath, isReplacement: forceReplacement, repoPath } = req.body;
       
       console.log("Upload base64 image request:", {
         hasImageData: !!imageData,
@@ -1556,8 +1556,27 @@ export async function registerRoutes(
       let filePath: string;
       let finalFilename: string;
       
-      // Check if filename contains a full path (for image replacement)
-      if (filename && filename.includes('/')) {
+      // If repoPath is provided (for optimization), use it directly
+      if (repoPath && forceReplacement) {
+        // Security: sanitize path to prevent traversal attacks
+        const sanitizedPath = repoPath
+          .replace(/\.\.\//g, '')
+          .replace(/\.\./g, '')
+          .replace(/\/\//g, '/')
+          .replace(/^\/+/, '')
+          .replace(/\\/g, '/');
+        
+        // Ensure the resolved path is within public/image/
+        if (!sanitizedPath.startsWith('public/image/')) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Invalid image path - must be within public/image directory" 
+          });
+        }
+        
+        filePath = sanitizedPath;
+        finalFilename = sanitizedPath.split('/').pop() || filename;
+      } else if (filename && filename.includes('/')) {
         // Security: sanitize path to prevent traversal attacks
         const sanitizedPath = filename
           .replace(/\.\.\//g, '')         // Remove ../
@@ -1618,8 +1637,9 @@ export async function registerRoutes(
       // If queueOnly mode, add to draft queue instead of committing
       if (queueOnly === true) {
         // Determine change type based on whether we're replacing an existing image
-        const isReplacement = previousPath && previousPath !== publicPath;
-        const changeType = isReplacement ? "image_replace" : "image_upload";
+        // forceReplacement is used when optimizing existing images (same path replacement)
+        const isReplacement = forceReplacement || (previousPath && previousPath !== publicPath);
+        const changeType = forceReplacement ? "image_optimize" : (isReplacement ? "image_replace" : "image_upload");
         
         // Build operations array for batch commit
         const operations: Array<{ type: "write" | "delete"; path: string; content?: string; encoding?: "utf-8" | "base64" }> = [];
@@ -1647,7 +1667,9 @@ export async function registerRoutes(
         const draftChange: DraftChange = {
           id: crypto.randomUUID(),
           type: changeType as any,
-          title: isReplacement ? `Replace image: ${finalFilename}` : `Upload image: ${finalFilename}`,
+          title: forceReplacement 
+            ? `Optimize image: ${finalFilename}` 
+            : (isReplacement ? `Replace image: ${finalFilename}` : `Upload image: ${finalFilename}`),
           path: filePath,
           content: base64Data,
           operations,
@@ -1655,6 +1677,7 @@ export async function registerRoutes(
             previousPath: previousPath || null,
             publicPath,
             mimeType,
+            isOptimization: forceReplacement || false,
           },
           createdAt: new Date().toISOString(),
         };

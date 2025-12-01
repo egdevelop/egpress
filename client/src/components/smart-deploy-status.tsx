@@ -79,6 +79,7 @@ export function SmartDeployStatus() {
     const category = change.type.startsWith("post_") ? "posts" : 
                      change.type.startsWith("image_") ? "images" :
                      change.type === "theme_update" ? "theme" :
+                     change.type === "seo_update" ? "seo" :
                      "settings";
     acc[category] = (acc[category] || 0) + 1;
     return acc;
@@ -88,6 +89,7 @@ export function SmartDeployStatus() {
   if (changeTypes.posts) summaryParts.push(`${changeTypes.posts} post${changeTypes.posts > 1 ? 's' : ''}`);
   if (changeTypes.images) summaryParts.push(`${changeTypes.images} image${changeTypes.images > 1 ? 's' : ''}`);
   if (changeTypes.theme) summaryParts.push(`theme`);
+  if (changeTypes.seo) summaryParts.push(`${changeTypes.seo} SEO fix${changeTypes.seo > 1 ? 'es' : ''}`);
   if (changeTypes.settings) summaryParts.push(`${changeTypes.settings} setting${changeTypes.settings > 1 ? 's' : ''}`);
 
   return (

@@ -226,10 +226,11 @@ export default function PerformancePage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             imageData: base64,
-            filename: image.path,
+            filename: image.name,
             mimeType: originalMimeType,
             queueOnly: true,
-            previousPath: image.path,
+            isReplacement: true,
+            repoPath: image.path,
           }),
           credentials: 'include',
         });

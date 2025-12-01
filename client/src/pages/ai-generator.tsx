@@ -557,6 +557,7 @@ export default function AIGenerator() {
               imageData: optimized.dataUrl,
               mimeType: optimized.mimeType,
               filename: slug,
+              queueOnly: true,
             });
             const uploadResult = await uploadResponse.json();
             
@@ -582,11 +583,12 @@ export default function AIGenerator() {
         heroImage: heroImagePath,
         author: authorName,
         commitMessage: `Add AI-generated post: ${generatedPostData.title}`,
+        queueOnly: true,
       });
       const saveResult = await response.json();
       
       if (saveResult.success) {
-        return { success: true, slug: saveResult.data.slug };
+        return { success: true, slug: saveResult.data?.slug || slug };
       } else {
         return { success: false, error: saveResult.error || "Failed to save post" };
       }
@@ -652,10 +654,11 @@ export default function AIGenerator() {
     
     setBulkState(prev => ({ ...prev, isRunning: false }));
     queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/smart-deploy/queue"] });
     
     toast({
       title: "Bulk Generation Complete",
-      description: `Generated ${bulkState.completedCount + 1} posts successfully`,
+      description: `Generated ${bulkState.completedCount + 1} posts - queued for deployment`,
     });
   };
 
