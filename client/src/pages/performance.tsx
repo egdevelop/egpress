@@ -175,8 +175,12 @@ export default function PerformancePage() {
         } else {
           const mimeType = options.format || 'image/webp';
           const ext = mimeType === 'image/webp' ? 'webp' : mimeType === 'image/jpeg' ? 'jpg' : 'png';
+          
+          const originalPath = image.original.path;
+          const lastSlashIndex = originalPath.lastIndexOf('/');
+          const directory = lastSlashIndex >= 0 ? originalPath.substring(0, lastSlashIndex + 1) : '';
           const originalName = image.original.name.replace(/\.[^.]+$/, '');
-          const optimizedFilename = `${originalName}.${ext}`;
+          const optimizedFilename = `${directory}${originalName}.${ext}`;
 
           const base64 = optimized.dataUrl.split(',')[1];
           

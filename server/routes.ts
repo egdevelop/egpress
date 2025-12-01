@@ -1553,18 +1553,29 @@ export async function registerRoutes(
       };
       const ext = extMap[mimeType] || '.png';
       
-      // Generate unique filename
-      const baseName = filename || `ai-hero-image`;
-      const sanitizedBaseName = baseName
-        .toLowerCase()
-        .replace(/[^a-z0-9]/g, '-')
-        .replace(/-+/g, '-')
-        .replace(/^-|-$/g, '');
+      let filePath: string;
+      let finalFilename: string;
       
-      const timestamp = Date.now();
-      const randomSuffix = crypto.randomBytes(3).toString('hex');
-      const finalFilename = `${sanitizedBaseName}-${timestamp}-${randomSuffix}${ext}`;
-      const filePath = `public/image/${finalFilename}`;
+      // Check if filename contains a full path (for image replacement)
+      if (filename && filename.includes('/')) {
+        // Filename contains a path - use it directly for replacement
+        // Extract just the filename portion for display
+        filePath = filename.startsWith('public/') ? filename : `public/${filename}`;
+        finalFilename = filename.split('/').pop() || filename;
+      } else {
+        // Generate unique filename for new uploads
+        const baseName = filename || `ai-hero-image`;
+        const sanitizedBaseName = baseName
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, '-')
+          .replace(/-+/g, '-')
+          .replace(/^-|-$/g, '');
+        
+        const timestamp = Date.now();
+        const randomSuffix = crypto.randomBytes(3).toString('hex');
+        finalFilename = `${sanitizedBaseName}-${timestamp}-${randomSuffix}${ext}`;
+        filePath = `public/image/${finalFilename}`;
+      }
       
       // Remove data URL prefix if present
       let base64Data = imageData;
