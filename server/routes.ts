@@ -4319,7 +4319,7 @@ export async function registerRoutes(
   // ==================== SEO ANALYZER ====================
 
   // Analyze SEO for all posts and site settings
-  app.get("/api/seo/analyze", requireAuth, requireRepo, async (req, res) => {
+  app.get("/api/seo/analyze", requireAuth, async (req, res) => {
     try {
       const repo = storage.getRepository();
       if (!repo) {
@@ -4648,7 +4648,7 @@ export async function registerRoutes(
   });
 
   // SEO Optimize - fix issues using AI
-  app.post("/api/seo/optimize", requireAuth, requireRepo, async (req, res) => {
+  app.post("/api/seo/optimize", requireAuth, async (req, res) => {
     try {
       const { postSlugs, queueOnly } = req.body;
 
