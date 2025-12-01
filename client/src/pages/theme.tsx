@@ -368,8 +368,8 @@ export default function ThemePage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("PUT", "/api/site-settings", {
-        designTokens,
+      const response = await apiRequest("PUT", "/api/theme", {
+        theme: designTokens,
         commitMessage,
       });
       return response.json();
@@ -378,9 +378,10 @@ export default function ThemePage() {
       if (data?.success) {
         toast({
           title: "Design Tokens Saved",
-          description: `Settings updated in siteSettings.ts`,
+          description: `Theme updated in siteSettings.ts`,
         });
         queryClient.invalidateQueries({ queryKey: ["/api/site-settings"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/theme"] });
       } else {
         toast({
           title: "Save Failed",
@@ -400,8 +401,8 @@ export default function ThemePage() {
 
   const queueMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiRequest("PUT", "/api/site-settings", {
-        designTokens,
+      const response = await apiRequest("PUT", "/api/theme", {
+        theme: designTokens,
         commitMessage,
         queueOnly: true,
       });
@@ -417,6 +418,7 @@ export default function ThemePage() {
         });
         queryClient.invalidateQueries({ queryKey: ["/api/smart-deploy/queue"] });
         queryClient.invalidateQueries({ queryKey: ["/api/site-settings"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/theme"] });
       } else {
         toast({
           title: "Queue Failed",
