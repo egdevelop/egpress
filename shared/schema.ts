@@ -372,3 +372,48 @@ export const smartDeploySettingsSchema = z.object({
 });
 
 export type SmartDeploySettings = z.infer<typeof smartDeploySettingsSchema>;
+
+// SEO Issue type enum
+export const seoIssueTypeSchema = z.enum(["error", "warning", "info"]);
+export type SEOIssueType = z.infer<typeof seoIssueTypeSchema>;
+
+// SEO Issue category enum
+export const seoIssueCategorySchema = z.enum(["meta", "content", "images", "structure", "social"]);
+export type SEOIssueCategory = z.infer<typeof seoIssueCategorySchema>;
+
+// SEO Issue schema
+export const seoIssueSchema = z.object({
+  type: seoIssueTypeSchema,
+  category: seoIssueCategorySchema,
+  title: z.string(),
+  description: z.string(),
+  affectedItem: z.string(), // post slug or "site-settings"
+  currentValue: z.string().optional(),
+  suggestedValue: z.string().optional(),
+  autoFixable: z.boolean(),
+});
+
+export type SEOIssue = z.infer<typeof seoIssueSchema>;
+
+// SEO Analysis Result schema
+export const seoAnalysisResultSchema = z.object({
+  score: z.number().min(0).max(100),
+  issues: z.array(seoIssueSchema),
+  summary: z.object({
+    errors: z.number(),
+    warnings: z.number(),
+    info: z.number(),
+  }),
+  analyzedPosts: z.number(),
+  analyzedAt: z.string(), // ISO timestamp
+});
+
+export type SEOAnalysisResult = z.infer<typeof seoAnalysisResultSchema>;
+
+// SEO Fix Request schema
+export const seoFixRequestSchema = z.object({
+  issueIds: z.array(z.string()).optional(), // if not provided, fix all autoFixable
+  generateMissing: z.boolean(), // use AI to generate missing descriptions
+});
+
+export type SEOFixRequest = z.infer<typeof seoFixRequestSchema>;

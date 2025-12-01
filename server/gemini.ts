@@ -124,6 +124,84 @@ Make sure the content is:
   }
 }
 
+export interface SEOSuggestion {
+  title?: string;
+  description?: string;
+  tags?: string[];
+}
+
+export async function generateSEOContent(
+  apiKey: string,
+  postTitle: string,
+  postContent: string,
+  currentDescription?: string,
+  currentTags?: string[]
+): Promise<SEOSuggestion> {
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `You are an SEO expert. Analyze this blog post and provide optimized SEO metadata.
+
+BLOG POST TITLE: ${postTitle}
+
+BLOG POST CONTENT (first 2000 chars):
+${postContent.substring(0, 2000)}
+
+CURRENT DESCRIPTION: ${currentDescription || "(none)"}
+CURRENT TAGS: ${currentTags?.join(", ") || "(none)"}
+
+Provide optimized SEO metadata:
+1. META DESCRIPTION: Write a compelling meta description (150-160 characters) that:
+   - Summarizes the post content accurately
+   - Includes primary keywords naturally
+   - Has a call-to-action or hook
+   - Is unique and engaging
+
+2. TAGS: Suggest 4-6 relevant SEO-friendly tags that:
+   - Are lowercase and hyphenated (e.g., "web-development")
+   - Include both broad and specific terms
+   - Are relevant to the content
+   - Help with discoverability
+
+3. TITLE OPTIMIZATION: If the current title could be improved for SEO, suggest a better one (50-60 chars).
+   Only include this if the current title needs improvement.
+
+Return JSON with:
+- description: string (the optimized meta description)
+- tags: string[] (array of suggested tags)
+- title: string (optional, only if current title needs improvement)`;
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: "object",
+          properties: {
+            description: { type: "string" },
+            tags: { type: "array", items: { type: "string" } },
+            title: { type: "string" },
+          },
+          required: ["description", "tags"],
+        },
+      },
+    });
+
+    const rawJson = response.text;
+    if (!rawJson) {
+      throw new Error("Empty response from Gemini");
+    }
+
+    return JSON.parse(rawJson);
+  } catch (error: any) {
+    if (error?.message?.includes("403") || error?.status === 403) {
+      throw new Error("API key tidak valid atau belum diaktifkan.");
+    }
+    throw error;
+  }
+}
+
 export async function generateImage(
   apiKey: string,
   prompt: string

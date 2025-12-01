@@ -21,7 +21,8 @@ import {
   Unplug,
   ArrowRightLeft,
   FileSliders,
-  Zap
+  Zap,
+  TrendingUp
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -154,6 +155,12 @@ const systemItems = [
     url: "/performance",
     icon: Zap,
     description: "Image optimization & deploy",
+  },
+  {
+    title: "SEO Analyzer",
+    url: "/seo",
+    icon: TrendingUp,
+    description: "Optimize search rankings",
   },
   {
     title: "Clone Site",

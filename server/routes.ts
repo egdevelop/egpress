@@ -5,7 +5,7 @@ import multer from "multer";
 import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storage";
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { VercelService } from "./vercel";
-import { generateBlogPost, generateImage } from "./gemini";
+import { generateBlogPost, generateImage, generateSEOContent } from "./gemini";
 import { 
   // User-level settings (credentials shared across all repos)
   getUserSettings,
@@ -4313,6 +4313,480 @@ export async function registerRoutes(
       res.json({ success: true });
     } catch (error) {
       res.json({ success: false, error: "Failed to clear API key" });
+    }
+  });
+
+  // ==================== SEO ANALYZER ====================
+
+  // Analyze SEO for all posts and site settings
+  app.get("/api/seo/analyze", requireAuth, requireRepo, async (req, res) => {
+    try {
+      const repo = storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = getGitHubClient();
+      if (!octokit) {
+        return res.json({ success: false, error: "GitHub not connected" });
+      }
+
+      const issues: Array<{
+        id: string;
+        type: "error" | "warning" | "info";
+        category: "meta" | "content" | "images" | "structure" | "social";
+        title: string;
+        description: string;
+        affectedItem: string;
+        currentValue?: string;
+        suggestedValue?: string;
+        autoFixable: boolean;
+      }> = [];
+
+      let issueId = 0;
+      const generateId = () => `seo-issue-${++issueId}`;
+
+      // Fetch posts
+      let posts: Array<{ path: string; slug: string; title: string; description?: string; heroImage?: string; tags?: string[]; content: string }> = [];
+      try {
+        const { data: postsDir } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/content/posts",
+          ref: repo.activeBranch,
+        });
+
+        if (Array.isArray(postsDir)) {
+          const mdFiles = postsDir.filter((f: any) => f.name.endsWith(".md") || f.name.endsWith(".mdx"));
+          
+          for (const file of mdFiles) {
+            try {
+              const { data: fileData } = await octokit.repos.getContent({
+                owner: repo.owner,
+                repo: repo.name,
+                path: file.path,
+                ref: repo.activeBranch,
+              });
+
+              if (!Array.isArray(fileData) && fileData.content) {
+                const content = Buffer.from(fileData.content, "base64").toString("utf-8");
+                const matter = await import("gray-matter");
+                const { data: frontmatter, content: body } = matter.default(content);
+                
+                posts.push({
+                  path: file.path,
+                  slug: file.name.replace(/\.(md|mdx)$/, ""),
+                  title: frontmatter.title || "",
+                  description: frontmatter.description,
+                  heroImage: frontmatter.heroImage,
+                  tags: frontmatter.tags,
+                  content: body,
+                });
+              }
+            } catch (e) {
+              console.warn(`Failed to read post ${file.path}:`, e);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to fetch posts:", e);
+      }
+
+      // Analyze each post
+      for (const post of posts) {
+        // Check title length (50-60 chars ideal)
+        if (!post.title) {
+          issues.push({
+            id: generateId(),
+            type: "error",
+            category: "meta",
+            title: "Missing title",
+            description: "Post has no title. Titles are critical for SEO.",
+            affectedItem: post.slug,
+            autoFixable: false,
+          });
+        } else if (post.title.length < 30) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "meta",
+            title: "Title too short",
+            description: "Title should be 50-60 characters for optimal SEO. Current length: " + post.title.length,
+            affectedItem: post.slug,
+            currentValue: post.title,
+            autoFixable: true,
+          });
+        } else if (post.title.length > 70) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "meta",
+            title: "Title too long",
+            description: "Title may be truncated in search results. Keep under 60 characters. Current length: " + post.title.length,
+            affectedItem: post.slug,
+            currentValue: post.title,
+            autoFixable: true,
+          });
+        }
+
+        // Check meta description
+        if (!post.description) {
+          issues.push({
+            id: generateId(),
+            type: "error",
+            category: "meta",
+            title: "Missing meta description",
+            description: "Post has no meta description. This is crucial for search engine snippets.",
+            affectedItem: post.slug,
+            autoFixable: true,
+          });
+        } else if (post.description.length < 120) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "meta",
+            title: "Meta description too short",
+            description: "Description should be 150-160 characters. Current length: " + post.description.length,
+            affectedItem: post.slug,
+            currentValue: post.description,
+            autoFixable: true,
+          });
+        } else if (post.description.length > 170) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "meta",
+            title: "Meta description too long",
+            description: "Description may be truncated. Keep under 160 characters. Current length: " + post.description.length,
+            affectedItem: post.slug,
+            currentValue: post.description,
+            autoFixable: true,
+          });
+        }
+
+        // Check hero image
+        if (!post.heroImage) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "images",
+            title: "Missing hero image",
+            description: "Posts with images get more engagement and better social sharing.",
+            affectedItem: post.slug,
+            autoFixable: false,
+          });
+        }
+
+        // Check tags
+        if (!post.tags || post.tags.length === 0) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "content",
+            title: "No tags",
+            description: "Tags help with content organization and SEO.",
+            affectedItem: post.slug,
+            autoFixable: true,
+          });
+        } else if (post.tags.length < 3) {
+          issues.push({
+            id: generateId(),
+            type: "info",
+            category: "content",
+            title: "Few tags",
+            description: "Consider adding more tags (4-6 recommended) for better discoverability.",
+            affectedItem: post.slug,
+            currentValue: post.tags.join(", "),
+            autoFixable: true,
+          });
+        }
+
+        // Check content length
+        const wordCount = post.content.split(/\s+/).filter(w => w.length > 0).length;
+        if (wordCount < 300) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "content",
+            title: "Content too short",
+            description: `Post has only ${wordCount} words. Aim for at least 800-1000 words for better SEO.`,
+            affectedItem: post.slug,
+            currentValue: `${wordCount} words`,
+            autoFixable: false,
+          });
+        }
+
+        // Check headings structure
+        const h1Count = (post.content.match(/^# /gm) || []).length;
+        const h2Count = (post.content.match(/^## /gm) || []).length;
+        
+        if (h2Count === 0 && wordCount > 300) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "structure",
+            title: "No subheadings",
+            description: "Use H2 headings (##) to structure your content for better readability and SEO.",
+            affectedItem: post.slug,
+            autoFixable: false,
+          });
+        }
+
+        // Check for images without alt text in content
+        const imagesInContent = post.content.match(/!\[([^\]]*)\]\([^)]+\)/g) || [];
+        const imagesWithoutAlt = imagesInContent.filter(img => img.match(/!\[\]\(/));
+        if (imagesWithoutAlt.length > 0) {
+          issues.push({
+            id: generateId(),
+            type: "warning",
+            category: "images",
+            title: "Images missing alt text",
+            description: `${imagesWithoutAlt.length} image(s) in content have no alt text. Alt text is important for accessibility and SEO.`,
+            affectedItem: post.slug,
+            currentValue: `${imagesWithoutAlt.length} images without alt`,
+            autoFixable: false,
+          });
+        }
+      }
+
+      // Fetch and analyze site settings
+      try {
+        const { data: settingsFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/config/siteSettings.ts",
+          ref: repo.activeBranch,
+        });
+
+        if (!Array.isArray(settingsFile) && settingsFile.content) {
+          const settingsContent = Buffer.from(settingsFile.content, "base64").toString("utf-8");
+
+          // Check for default/placeholder values
+          if (settingsContent.includes('siteName: "My Blog"') || settingsContent.includes("siteName: 'My Blog'")) {
+            issues.push({
+              id: generateId(),
+              type: "error",
+              category: "meta",
+              title: "Default site name",
+              description: "Site is using the default name 'My Blog'. Update to your actual site name.",
+              affectedItem: "site-settings",
+              currentValue: "My Blog",
+              autoFixable: false,
+            });
+          }
+
+          // Check site description
+          if (!settingsContent.includes("siteDescription:") || settingsContent.includes('siteDescription: ""')) {
+            issues.push({
+              id: generateId(),
+              type: "error",
+              category: "meta",
+              title: "Missing site description",
+              description: "Site description is empty. Add a description for better SEO.",
+              affectedItem: "site-settings",
+              autoFixable: false,
+            });
+          }
+
+          // Check OG image
+          if (!settingsContent.includes("defaultImage:") || settingsContent.includes('defaultImage: ""')) {
+            issues.push({
+              id: generateId(),
+              type: "warning",
+              category: "social",
+              title: "Missing default OG image",
+              description: "No default Open Graph image set. This affects social media sharing.",
+              affectedItem: "site-settings",
+              autoFixable: false,
+            });
+          }
+
+          // Check Twitter handle
+          if (!settingsContent.includes("twitterHandle:") || settingsContent.includes('twitterHandle: ""')) {
+            issues.push({
+              id: generateId(),
+              type: "info",
+              category: "social",
+              title: "Missing Twitter handle",
+              description: "Add your Twitter handle for proper attribution in Twitter cards.",
+              affectedItem: "site-settings",
+              autoFixable: false,
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("Failed to analyze site settings:", e);
+      }
+
+      // Calculate score
+      const errorCount = issues.filter(i => i.type === "error").length;
+      const warningCount = issues.filter(i => i.type === "warning").length;
+      const infoCount = issues.filter(i => i.type === "info").length;
+      
+      // Score calculation: start at 100, -10 per error, -5 per warning, -1 per info
+      let score = 100 - (errorCount * 10) - (warningCount * 5) - (infoCount * 1);
+      score = Math.max(0, Math.min(100, score));
+
+      res.json({
+        success: true,
+        data: {
+          score,
+          issues,
+          summary: {
+            errors: errorCount,
+            warnings: warningCount,
+            info: infoCount,
+          },
+          analyzedPosts: posts.length,
+          analyzedAt: new Date().toISOString(),
+        },
+      });
+    } catch (error: any) {
+      console.error("SEO analyze error:", error);
+      res.json({ success: false, error: error.message || "Failed to analyze SEO" });
+    }
+  });
+
+  // SEO Optimize - fix issues using AI
+  app.post("/api/seo/optimize", requireAuth, requireRepo, async (req, res) => {
+    try {
+      const { postSlugs, queueOnly } = req.body;
+
+      if (!postSlugs || !Array.isArray(postSlugs) || postSlugs.length === 0) {
+        return res.json({ success: false, error: "No posts specified for optimization" });
+      }
+
+      const apiKey = await storage.getGeminiApiKey();
+      if (!apiKey) {
+        return res.json({ success: false, error: "Gemini API key required for AI optimization. Please set it in AI Settings." });
+      }
+
+      const repo = storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = getGitHubClient();
+      if (!octokit) {
+        return res.json({ success: false, error: "GitHub not connected" });
+      }
+
+      const matter = await import("gray-matter");
+      const results: Array<{ slug: string; success: boolean; changes?: string[]; error?: string }> = [];
+      const operations: Array<{ type: "write"; path: string; content: string }> = [];
+
+      for (const slug of postSlugs) {
+        try {
+          const postPath = `src/content/posts/${slug}.md`;
+          
+          // Fetch the post
+          const { data: fileData } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: postPath,
+            ref: repo.activeBranch,
+          });
+
+          if (Array.isArray(fileData) || !fileData.content) {
+            results.push({ slug, success: false, error: "Post not found" });
+            continue;
+          }
+
+          const content = Buffer.from(fileData.content, "base64").toString("utf-8");
+          const { data: frontmatter, content: body } = matter.default(content);
+          
+          // Generate SEO content using AI
+          const seoSuggestion = await generateSEOContent(
+            apiKey,
+            frontmatter.title || slug,
+            body,
+            frontmatter.description,
+            frontmatter.tags
+          );
+
+          const changes: string[] = [];
+
+          // Apply suggestions
+          if (!frontmatter.description && seoSuggestion.description) {
+            frontmatter.description = seoSuggestion.description;
+            changes.push("Added meta description");
+          } else if (frontmatter.description && seoSuggestion.description && 
+                     (frontmatter.description.length < 120 || frontmatter.description.length > 170)) {
+            frontmatter.description = seoSuggestion.description;
+            changes.push("Optimized meta description length");
+          }
+
+          if ((!frontmatter.tags || frontmatter.tags.length < 3) && seoSuggestion.tags) {
+            frontmatter.tags = seoSuggestion.tags;
+            changes.push("Added/updated tags");
+          }
+
+          if (changes.length > 0) {
+            // Rebuild the file
+            const newContent = matter.default.stringify(body, frontmatter);
+
+            if (queueOnly === true) {
+              operations.push({
+                type: "write",
+                path: postPath,
+                content: newContent,
+              });
+            } else {
+              // Direct commit
+              await octokit.repos.createOrUpdateFileContents({
+                owner: repo.owner,
+                repo: repo.name,
+                path: postPath,
+                message: `SEO optimize: ${slug}`,
+                content: Buffer.from(newContent).toString("base64"),
+                sha: (fileData as any).sha,
+                branch: repo.activeBranch,
+              });
+            }
+          }
+
+          results.push({ slug, success: true, changes });
+        } catch (error: any) {
+          results.push({ slug, success: false, error: error.message });
+        }
+      }
+
+      // If queueOnly, add to Smart Deploy queue
+      if (queueOnly === true && operations.length > 0) {
+        const draftChange: any = {
+          id: crypto.randomUUID(),
+          type: "post_update",
+          title: `SEO optimize ${operations.length} post${operations.length > 1 ? 's' : ''}`,
+          path: operations[0].path,
+          operations: operations.map(op => ({
+            type: "write" as const,
+            path: op.path,
+            content: op.content,
+            encoding: "utf-8" as const,
+          })),
+          metadata: {
+            optimizedPosts: postSlugs,
+            count: operations.length,
+          },
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+      }
+
+      const optimizedCount = results.filter(r => r.success && r.changes && r.changes.length > 0).length;
+
+      res.json({
+        success: true,
+        data: {
+          results,
+          optimizedCount,
+          queued: queueOnly === true,
+        },
+      });
+    } catch (error: any) {
+      console.error("SEO optimize error:", error);
+      res.json({ success: false, error: error.message || "Failed to optimize SEO" });
     }
   });
 
