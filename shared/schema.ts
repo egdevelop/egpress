@@ -310,3 +310,49 @@ export const vercelAddDomainSchema = z.object({
 });
 
 export type VercelAddDomain = z.infer<typeof vercelAddDomainSchema>;
+
+// Draft change types for Smart Deploy batching
+export const draftChangeTypeSchema = z.enum([
+  "post_create",
+  "post_update", 
+  "post_delete",
+  "settings_update",
+  "theme_update",
+  "image_upload",
+  "file_update",
+]);
+
+export type DraftChangeType = z.infer<typeof draftChangeTypeSchema>;
+
+// Individual draft change item
+export const draftChangeSchema = z.object({
+  id: z.string(),
+  type: draftChangeTypeSchema,
+  title: z.string(), // Human-readable description
+  path: z.string(), // File path affected
+  content: z.string().optional(), // New content (for creates/updates)
+  previousContent: z.string().optional(), // Previous content (for showing diff)
+  metadata: z.record(z.any()).optional(), // Additional data (e.g., commit message)
+  createdAt: z.string(), // ISO timestamp
+});
+
+export type DraftChange = z.infer<typeof draftChangeSchema>;
+
+// Draft queue state
+export const draftQueueSchema = z.object({
+  repositoryId: z.string(),
+  changes: z.array(draftChangeSchema),
+  baseSha: z.string().optional(), // SHA of the commit these changes are based on
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+export type DraftQueue = z.infer<typeof draftQueueSchema>;
+
+// Smart Deploy settings
+export const smartDeploySettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  autoQueueChanges: z.boolean().default(true), // Automatically queue instead of immediate commit
+});
+
+export type SmartDeploySettings = z.infer<typeof smartDeploySettingsSchema>;

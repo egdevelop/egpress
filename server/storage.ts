@@ -1,4 +1,4 @@
-import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo, VercelConfig, VercelProject, VercelDeployment, VercelDomain } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo, VercelConfig, VercelProject, VercelDeployment, VercelDomain, DraftQueue, DraftChange, SmartDeploySettings } from "@shared/schema";
 import { randomUUID } from "crypto";
 
 export interface SearchConsoleConfig {
@@ -76,6 +76,15 @@ export interface IStorage {
   // Gemini
   getGeminiApiKey(): Promise<string | null>;
   setGeminiApiKey(key: string | null): Promise<void>;
+
+  // Smart Deploy Draft Queue
+  getDraftQueue(): Promise<DraftQueue | null>;
+  setDraftQueue(queue: DraftQueue | null): Promise<void>;
+  addDraftChange(change: DraftChange): Promise<void>;
+  removeDraftChange(changeId: string): Promise<void>;
+  clearDraftQueue(): Promise<void>;
+  getSmartDeploySettings(): Promise<SmartDeploySettings>;
+  setSmartDeploySettings(settings: SmartDeploySettings): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -95,6 +104,8 @@ export class MemStorage implements IStorage {
   private vercelDeployments: VercelDeployment[] = [];
   private vercelDomains: VercelDomain[] = [];
   private geminiApiKey: string | null = null;
+  private draftQueue: DraftQueue | null = null;
+  private smartDeploySettings: SmartDeploySettings = { enabled: true, autoQueueChanges: true };
 
   async getRepository(): Promise<Repository | null> {
     return this.repository;
@@ -278,6 +289,62 @@ export class MemStorage implements IStorage {
 
   async setGeminiApiKey(key: string | null): Promise<void> {
     this.geminiApiKey = key;
+  }
+
+  async getDraftQueue(): Promise<DraftQueue | null> {
+    return this.draftQueue;
+  }
+
+  async setDraftQueue(queue: DraftQueue | null): Promise<void> {
+    this.draftQueue = queue;
+  }
+
+  async addDraftChange(change: DraftChange): Promise<void> {
+    const repo = await this.getRepository();
+    if (!repo) return;
+    
+    const now = new Date().toISOString();
+    
+    if (!this.draftQueue) {
+      this.draftQueue = {
+        repositoryId: repo.id,
+        changes: [],
+        createdAt: now,
+        updatedAt: now,
+      };
+    }
+    
+    // Check if there's already a change for this path - replace it
+    const existingIndex = this.draftQueue.changes.findIndex(c => c.path === change.path);
+    if (existingIndex >= 0) {
+      this.draftQueue.changes[existingIndex] = change;
+    } else {
+      this.draftQueue.changes.push(change);
+    }
+    this.draftQueue.updatedAt = now;
+  }
+
+  async removeDraftChange(changeId: string): Promise<void> {
+    if (!this.draftQueue) return;
+    this.draftQueue.changes = this.draftQueue.changes.filter(c => c.id !== changeId);
+    this.draftQueue.updatedAt = new Date().toISOString();
+    
+    // Clear queue if empty
+    if (this.draftQueue.changes.length === 0) {
+      this.draftQueue = null;
+    }
+  }
+
+  async clearDraftQueue(): Promise<void> {
+    this.draftQueue = null;
+  }
+
+  async getSmartDeploySettings(): Promise<SmartDeploySettings> {
+    return this.smartDeploySettings;
+  }
+
+  async setSmartDeploySettings(settings: SmartDeploySettings): Promise<void> {
+    this.smartDeploySettings = settings;
   }
 }
 
