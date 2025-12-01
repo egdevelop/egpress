@@ -1771,6 +1771,258 @@ export async function registerRoutes(
     }
   });
 
+  // Comprehensive performance analysis - detect unused assets, large images, etc.
+  app.get("/api/performance/analyze", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = await getGitHubClient();
+
+      // Get all images in the repository
+      const { data: tree } = await octokit.git.getTree({
+        owner: repo.owner,
+        repo: repo.name,
+        tree_sha: repo.activeBranch,
+        recursive: "true",
+      });
+
+      const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg'];
+      const allImages = tree.tree
+        .filter(item => {
+          if (item.type !== 'blob' || !item.path) return false;
+          const isInPublicImage = item.path.startsWith('public/image/') || item.path.startsWith('public/images/');
+          const hasImageExtension = imageExtensions.some(ext => item.path!.toLowerCase().endsWith(ext));
+          return isInPublicImage && hasImageExtension;
+        })
+        .map(item => ({
+          path: item.path!,
+          sha: item.sha || '',
+          size: item.size || 0,
+          publicPath: item.path!.replace(/^public/, ''),
+          name: item.path!.split('/').pop() || '',
+        }));
+
+      // Get all posts to find referenced images
+      const posts = await storage.getPosts();
+      const referencedImages = new Set<string>();
+
+      // Check heroImage in all posts
+      for (const post of posts) {
+        if (post.heroImage) {
+          // Normalize the path
+          const normalizedPath = post.heroImage.startsWith('/') 
+            ? post.heroImage 
+            : `/${post.heroImage}`;
+          referencedImages.add(normalizedPath);
+          
+          // Also check for markdown content image references
+          if (post.content) {
+            const imageMatches = post.content.match(/!\[.*?\]\((\/image\/[^)]+)\)/g) || [];
+            for (const match of imageMatches) {
+              const pathMatch = match.match(/\((\/image\/[^)]+)\)/);
+              if (pathMatch) {
+                referencedImages.add(pathMatch[1]);
+              }
+            }
+            
+            // Also check HTML img tags
+            const imgTagMatches = post.content.match(/src=["'](\/image\/[^"']+)["']/g) || [];
+            for (const match of imgTagMatches) {
+              const pathMatch = match.match(/src=["'](\/image\/[^"']+)["']/);
+              if (pathMatch) {
+                referencedImages.add(pathMatch[1]);
+              }
+            }
+          }
+        }
+      }
+
+      // Try to get site settings to check for logo, favicon, ogImage
+      try {
+        const siteSettingsFile = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/config/siteSettings.ts",
+          ref: repo.activeBranch,
+        });
+
+        if (!Array.isArray(siteSettingsFile.data) && "content" in siteSettingsFile.data) {
+          const content = Buffer.from(siteSettingsFile.data.content, "base64").toString("utf-8");
+          
+          // Find image paths in settings
+          const settingsImageMatches = content.match(/["'](\/image\/[^"']+)["']/g) || [];
+          for (const match of settingsImageMatches) {
+            const pathMatch = match.match(/["'](\/image\/[^"']+)["']/);
+            if (pathMatch) {
+              referencedImages.add(pathMatch[1]);
+            }
+          }
+        }
+      } catch (e) {
+        // Settings file not found, continue
+      }
+
+      // Categorize images
+      const unusedImages: typeof allImages = [];
+      const usedImages: typeof allImages = [];
+      const largeImages: typeof allImages = [];
+      const optimizableImages: typeof allImages = [];
+
+      const LARGE_SIZE_THRESHOLD = 500 * 1024; // 500KB
+      const NEEDS_OPTIMIZATION_THRESHOLD = 200 * 1024; // 200KB
+
+      for (const image of allImages) {
+        const isUsed = referencedImages.has(image.publicPath) || 
+                       referencedImages.has(image.publicPath.replace(/^\//, ''));
+        
+        if (isUsed) {
+          usedImages.push(image);
+        } else {
+          unusedImages.push(image);
+        }
+
+        if (image.size > LARGE_SIZE_THRESHOLD) {
+          largeImages.push(image);
+        }
+
+        // Check if image needs optimization (large and not SVG)
+        if (image.size > NEEDS_OPTIMIZATION_THRESHOLD && !image.name.toLowerCase().endsWith('.svg')) {
+          optimizableImages.push(image);
+        }
+      }
+
+      // Calculate totals
+      const totalSize = allImages.reduce((sum, img) => sum + img.size, 0);
+      const unusedSize = unusedImages.reduce((sum, img) => sum + img.size, 0);
+      const potentialSavings = optimizableImages.reduce((sum, img) => sum + Math.floor(img.size * 0.6), 0); // Estimate 60% savings
+
+      res.json({
+        success: true,
+        data: {
+          summary: {
+            totalImages: allImages.length,
+            totalSize,
+            unusedCount: unusedImages.length,
+            unusedSize,
+            largeCount: largeImages.length,
+            optimizableCount: optimizableImages.length,
+            potentialSavings,
+          },
+          unusedImages,
+          usedImages,
+          largeImages,
+          optimizableImages,
+          referencedPaths: Array.from(referencedImages),
+        },
+      });
+    } catch (error: any) {
+      console.error("Performance analysis error:", error);
+      res.json({ success: false, error: error.message || "Failed to analyze performance" });
+    }
+  });
+
+  // Delete unused assets (batch delete through Smart Deploy)
+  app.post("/api/performance/cleanup", requireAuth, async (req, res) => {
+    try {
+      const { imagePaths, queueOnly } = req.body;
+      
+      if (!imagePaths || !Array.isArray(imagePaths) || imagePaths.length === 0) {
+        return res.status(400).json({ success: false, error: "No image paths provided" });
+      }
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      // Validate all paths are within public/image
+      for (const imagePath of imagePaths) {
+        const normalizedPath = imagePath.startsWith('public/') ? imagePath : `public${imagePath}`;
+        if (!normalizedPath.startsWith('public/image/')) {
+          return res.status(400).json({ 
+            success: false, 
+            error: `Invalid path: ${imagePath} - must be within public/image directory` 
+          });
+        }
+      }
+
+      if (queueOnly === true) {
+        // Add to Smart Deploy queue
+        const operations: Array<{ type: "delete"; path: string }> = imagePaths.map(imagePath => ({
+          type: "delete" as const,
+          path: imagePath.startsWith('public/') ? imagePath : `public${imagePath}`,
+        }));
+
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: "image_delete",
+          title: `Delete ${imagePaths.length} unused asset${imagePaths.length > 1 ? 's' : ''}`,
+          path: operations[0].path,
+          operations,
+          metadata: {
+            deletedPaths: imagePaths,
+            count: imagePaths.length,
+          },
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+
+        return res.json({
+          success: true,
+          queued: true,
+          deletedCount: imagePaths.length,
+          message: `Queued ${imagePaths.length} asset${imagePaths.length > 1 ? 's' : ''} for deletion`,
+        });
+      }
+
+      // Direct delete (not queued)
+      const octokit = await getGitHubClient();
+      let deletedCount = 0;
+      const errors: string[] = [];
+
+      for (const imagePath of imagePaths) {
+        const repoPath = imagePath.startsWith('public/') ? imagePath : `public${imagePath}`;
+        
+        try {
+          // Get file SHA
+          const { data: fileData } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: repoPath,
+            ref: repo.activeBranch,
+          });
+
+          if (!Array.isArray(fileData) && fileData.sha) {
+            await octokit.repos.deleteFile({
+              owner: repo.owner,
+              repo: repo.name,
+              path: repoPath,
+              message: `Delete unused asset: ${repoPath.split('/').pop()}`,
+              sha: fileData.sha,
+              branch: repo.activeBranch,
+            });
+            deletedCount++;
+          }
+        } catch (err: any) {
+          errors.push(`Failed to delete ${repoPath}: ${err.message}`);
+        }
+      }
+
+      res.json({
+        success: true,
+        deletedCount,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    } catch (error: any) {
+      console.error("Cleanup error:", error);
+      res.json({ success: false, error: error.message || "Failed to cleanup assets" });
+    }
+  });
+
   // Analyze CSS structure in repository (for debugging theme issues)
   app.get("/api/theme/analyze", async (req, res) => {
     try {
