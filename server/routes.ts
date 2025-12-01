@@ -1518,15 +1518,18 @@ export async function registerRoutes(
   });
 
   // Upload base64 image to GitHub (for AI-generated images)
+  // Supports queueOnly mode for Smart Deploy and previousPath for replacing images
   app.post("/api/upload-image-base64", requireAuth, async (req, res) => {
     try {
-      const { imageData, mimeType, filename } = req.body;
+      const { imageData, mimeType, filename, queueOnly, previousPath } = req.body;
       
       console.log("Upload base64 image request:", {
         hasImageData: !!imageData,
         imageDataLength: imageData?.length,
         mimeType,
         filename,
+        queueOnly,
+        previousPath,
       });
       
       if (!imageData) {
@@ -1569,18 +1572,110 @@ export async function registerRoutes(
         base64Data = imageData.split(',')[1];
       }
       
+      // Return the public path
+      const publicPath = `/image/${finalFilename}`;
+      
+      // If queueOnly mode, add to draft queue instead of committing
+      if (queueOnly === true) {
+        // Determine change type based on whether we're replacing an existing image
+        const isReplacement = previousPath && previousPath !== publicPath;
+        const changeType = isReplacement ? "image_replace" : "image_upload";
+        
+        // Build operations array for batch commit
+        const operations: Array<{ type: "write" | "delete"; path: string; content?: string; encoding?: "utf-8" | "base64" }> = [];
+        
+        // If replacing, first delete the old image
+        if (isReplacement && previousPath) {
+          // Convert public path to repo path (e.g., /image/foo.jpg -> public/image/foo.jpg)
+          const previousRepoPath = previousPath.startsWith('/image/') 
+            ? `public${previousPath}` 
+            : previousPath;
+          operations.push({
+            type: "delete",
+            path: previousRepoPath,
+          });
+        }
+        
+        // Add the new image
+        operations.push({
+          type: "write",
+          path: filePath,
+          content: base64Data,
+          encoding: "base64",
+        });
+        
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: changeType as any,
+          title: isReplacement ? `Replace image: ${finalFilename}` : `Upload image: ${finalFilename}`,
+          path: filePath,
+          content: base64Data,
+          operations,
+          metadata: {
+            previousPath: previousPath || null,
+            publicPath,
+            mimeType,
+          },
+          createdAt: new Date().toISOString(),
+        };
+        
+        await storage.addDraftChange(draftChange);
+        
+        return res.json({ 
+          success: true,
+          queued: true,
+          path: publicPath,
+          fullPath: filePath,
+          filename: finalFilename,
+        });
+      }
+      
+      // Immediate commit mode (default behavior)
+      
+      // If replacing, delete the old image first
+      if (previousPath) {
+        const previousRepoPath = previousPath.startsWith('/image/') 
+          ? `public${previousPath}` 
+          : previousPath;
+        try {
+          // Get the file SHA to delete it
+          const { data: fileData } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: previousRepoPath,
+            ref: repo.activeBranch,
+          });
+          
+          if (!Array.isArray(fileData) && fileData.sha) {
+            await octokit.repos.deleteFile({
+              owner: repo.owner,
+              repo: repo.name,
+              path: previousRepoPath,
+              message: `Delete replaced image: ${previousRepoPath.split('/').pop()}`,
+              sha: fileData.sha,
+              branch: repo.activeBranch,
+            });
+            console.log(`Deleted previous image: ${previousRepoPath}`);
+          }
+        } catch (error: any) {
+          // If file doesn't exist, that's fine - just continue
+          if (error.status !== 404) {
+            console.error("Error deleting previous image:", error);
+          }
+        }
+      }
+      
       // Upload file to GitHub
       await octokit.repos.createOrUpdateFileContents({
         owner: repo.owner,
         repo: repo.name,
         path: filePath,
-        message: `Upload AI-generated hero image: ${finalFilename}`,
+        message: previousPath 
+          ? `Replace image: ${finalFilename}` 
+          : `Upload AI-generated hero image: ${finalFilename}`,
         content: base64Data,
         branch: repo.activeBranch,
       });
-      
-      // Return the public path
-      const publicPath = `/image/${finalFilename}`;
       
       res.json({ 
         success: true, 
