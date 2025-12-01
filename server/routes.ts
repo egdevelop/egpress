@@ -145,6 +145,17 @@ function buildFileTree(items: Array<{ path: string; type: string }>): FileTreeIt
   return sortTree(Array.from(root.values()));
 }
 
+// Helper to check if Smart Deploy is enabled and changes should be queued
+// Returns true if Smart Deploy is active and changes should be queued instead of committed
+async function isSmartDeployActive(): Promise<boolean> {
+  try {
+    const settings = await storage.getSmartDeploySettings();
+    return settings.enabled === true;
+  } catch {
+    return false;
+  }
+}
+
 // Parse Astro frontmatter post
 function parsePost(path: string, content: string): Post | null {
   try {
@@ -1056,8 +1067,12 @@ export async function registerRoutes(
         rawFrontmatter: newRawFrontmatter,
       };
 
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly || smartDeployActive;
+
       // Check if we should queue instead of commit
-      if (queueOnly) {
+      if (shouldQueue) {
         // Add to draft queue instead of committing
         await storage.addDraftChange({
           id: crypto.randomUUID(),
@@ -1146,8 +1161,12 @@ export async function registerRoutes(
         rawFrontmatter: updatedRawFrontmatter,
       };
 
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly || smartDeployActive;
+
       // Check if we should queue instead of commit
-      if (queueOnly) {
+      if (shouldQueue) {
         // Add to draft queue instead of committing
         await storage.addDraftChange({
           id: crypto.randomUUID(),
@@ -1224,8 +1243,12 @@ export async function registerRoutes(
 
       const { queueOnly } = req.query;
 
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly === 'true' || smartDeployActive;
+
       // Check if we should queue instead of commit
-      if (queueOnly === 'true') {
+      if (shouldQueue) {
         // Add to draft queue instead of committing
         await storage.addDraftChange({
           id: crypto.randomUUID(),
