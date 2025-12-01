@@ -27,7 +27,7 @@ import {
 import matter from "gray-matter";
 import yaml from "yaml";
 import { Octokit } from "@octokit/rest";
-import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo } from "@shared/schema";
+import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo, DraftChange } from "@shared/schema";
 import { siteConfigSchema, adsenseConfigSchema } from "@shared/schema";
 import { Project, SyntaxKind, ObjectLiteralExpression, PropertyAssignment } from 'ts-morph';
 
@@ -1332,7 +1332,7 @@ export async function registerRoutes(
   // Update file content
   app.put("/api/files/content", async (req, res) => {
     try {
-      const { path, content, commitMessage } = req.body;
+      const { path, content, commitMessage, queueOnly } = req.body;
       
       if (!path || typeof content !== "string") {
         return res.json({ success: false, error: "Path and content are required" });
@@ -1341,6 +1341,34 @@ export async function registerRoutes(
       const repo = await storage.getRepository();
       if (!repo) {
         return res.json({ success: false, error: "No repository connected" });
+      }
+
+      // If queueOnly is true, add to draft queue instead of committing
+      if (queueOnly === true) {
+        const filename = path.split("/").pop() || path;
+        const isStaticPage = path.startsWith("src/pages/");
+        
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: isStaticPage ? "static_page_update" : "file_update",
+          title: `Update ${filename}`,
+          path,
+          content,
+          operations: [
+            {
+              type: "write",
+              path,
+              content,
+              encoding: "utf-8",
+            },
+          ],
+          createdAt: new Date().toISOString(),
+        };
+        
+        await storage.addDraftChange(draftChange);
+        await storage.setFileContent(path, content);
+        
+        return res.json({ success: true, queued: true });
       }
 
       const octokit = await getGitHubClient();
@@ -1810,7 +1838,7 @@ export async function registerRoutes(
   // Update theme settings
   app.put("/api/theme", async (req, res) => {
     try {
-      const { theme, commitMessage } = req.body;
+      const { theme, commitMessage, queueOnly } = req.body;
       
       const repo = await storage.getRepository();
       if (!repo) {
@@ -1830,6 +1858,8 @@ export async function registerRoutes(
       let cssUpdated = false;
       let cssPath = "";
       let updatedVars: string[] = [];
+      let updatedCssContent = "";
+      let cssFileSha: string | undefined;
       
       for (const filePath of cssFiles) {
         try {
@@ -1881,18 +1911,11 @@ export async function registerRoutes(
 
             // Only update if content changed
             if (cssContent !== originalContent) {
-              await octokit.repos.createOrUpdateFileContents({
-                owner: repo.owner,
-                repo: repo.name,
-                path: filePath,
-                message: commitMessage || "Update theme colors",
-                content: Buffer.from(cssContent).toString("base64"),
-                sha: data.sha,
-                branch: repo.activeBranch,
-              });
               cssUpdated = true;
               cssPath = filePath;
-              console.log(`Updated CSS variables in ${filePath}:`, updatedVars);
+              updatedCssContent = cssContent;
+              cssFileSha = data.sha;
+              console.log(`Generated CSS updates for ${filePath}:`, updatedVars);
               break;
             }
           }
@@ -1900,6 +1923,61 @@ export async function registerRoutes(
           // Try next file
           console.log(`CSS file not found: ${filePath}`);
         }
+      }
+
+      // If queueOnly is true, add to draft queue instead of committing
+      if (queueOnly === true) {
+        if (!cssUpdated) {
+          return res.json({ 
+            success: false, 
+            error: "No CSS file found or no matching variables to update" 
+          });
+        }
+
+        const draftChange: DraftChange = {
+          id: crypto.randomUUID(),
+          type: "theme_update",
+          title: "Update theme colors",
+          path: cssPath,
+          content: updatedCssContent,
+          operations: [
+            {
+              type: "write",
+              path: cssPath,
+              content: updatedCssContent,
+              encoding: "utf-8",
+            },
+          ],
+          metadata: {
+            updatedVars,
+            theme,
+          },
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+        await storage.setTheme(theme);
+
+        return res.json({ 
+          success: true, 
+          queued: true,
+          cssPath,
+          updatedVars,
+        });
+      }
+
+      // Immediate commit behavior (default)
+      if (cssUpdated && cssFileSha) {
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: cssPath,
+          message: commitMessage || "Update theme colors",
+          content: Buffer.from(updatedCssContent).toString("base64"),
+          sha: cssFileSha,
+          branch: repo.activeBranch,
+        });
+        console.log(`Committed CSS variables update to ${cssPath}`);
       }
 
       // Also save theme.json for reference
@@ -2944,7 +3022,7 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const { designTokens, siteSettings, commitMessage } = req.body;
+      const { designTokens, siteSettings, commitMessage, queueOnly } = req.body;
       const octokit = await getGitHubClient();
       const filePath = "src/config/siteSettings.ts";
 
@@ -2973,8 +3051,42 @@ export async function registerRoutes(
         content = updateSiteSettingsInTS(content, siteSettings);
       }
 
-      // Only commit if content changed
+      // Only process if content changed
       if (content !== originalContent) {
+        // If queueOnly is true, add to draft queue instead of committing
+        if (queueOnly === true) {
+          const draftChange: DraftChange = {
+            id: crypto.randomUUID(),
+            type: "settings_update",
+            title: "Update site settings",
+            path: filePath,
+            content: content,
+            operations: [
+              {
+                type: "write",
+                path: filePath,
+                content: content,
+                encoding: "utf-8",
+              },
+            ],
+            metadata: {
+              commitMessage: commitMessage || "Update site settings",
+              designTokens,
+              siteSettings,
+            },
+            createdAt: new Date().toISOString(),
+          };
+
+          await storage.addDraftChange(draftChange);
+
+          return res.json({ 
+            success: true, 
+            queued: true,
+            filePath
+          });
+        }
+
+        // Immediate commit behavior (default)
         await octokit.repos.createOrUpdateFileContents({
           owner: repo.owner,
           repo: repo.name,
@@ -3187,7 +3299,7 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const { contentDefaults, commitMessage } = req.body;
+      const { contentDefaults, commitMessage, queueOnly } = req.body;
       const octokit = await getGitHubClient();
       const filePath = "src/config/siteSettings.ts";
 
@@ -3211,8 +3323,40 @@ export async function registerRoutes(
         content = updateContentDefaultsInTS(content, contentDefaults);
       }
 
-      // Only commit if content changed
+      // Only process if content changed
       if (content !== originalContent) {
+        // If queueOnly is true, add to draft queue instead of committing
+        if (queueOnly === true) {
+          const draftChange: DraftChange = {
+            id: crypto.randomUUID(),
+            type: "content_defaults_update",
+            title: "Update content defaults",
+            path: filePath,
+            content: content,
+            previousContent: originalContent,
+            operations: [{
+              type: "write",
+              path: filePath,
+              content: content,
+              encoding: "utf-8",
+            }],
+            metadata: {
+              commitMessage: commitMessage || "Update content defaults",
+            },
+            createdAt: new Date().toISOString(),
+          };
+
+          await storage.addDraftChange(draftChange);
+
+          return res.json({ 
+            success: true, 
+            queued: true,
+            message: "Content defaults changes queued for batch deploy",
+            filePath
+          });
+        }
+
+        // Immediate commit (default behavior)
         await octokit.repos.createOrUpdateFileContents({
           owner: repo.owner,
           repo: repo.name,
