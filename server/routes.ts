@@ -1941,17 +1941,110 @@ export async function registerRoutes(
       // Validate all paths are within public/image
       for (const imagePath of imagePaths) {
         const normalizedPath = imagePath.startsWith('public/') ? imagePath : `public${imagePath}`;
-        if (!normalizedPath.startsWith('public/image/')) {
+        if (!normalizedPath.startsWith('public/image/') && !normalizedPath.startsWith('public/images/')) {
           return res.status(400).json({ 
             success: false, 
             error: `Invalid path: ${imagePath} - must be within public/image directory` 
           });
         }
+        // Extra path traversal check
+        if (normalizedPath.includes('..')) {
+          return res.status(400).json({ 
+            success: false, 
+            error: `Invalid path: ${imagePath} - path traversal not allowed` 
+          });
+        }
+      }
+
+      // Re-verify these are actually unused by running analysis
+      const octokit = await getGitHubClient();
+      const posts = await storage.getPosts();
+      const referencedImages = new Set<string>();
+
+      // Check heroImage and content in all posts
+      for (const post of posts) {
+        if (post.heroImage) {
+          const normalizedPath = post.heroImage.startsWith('/') 
+            ? post.heroImage 
+            : `/${post.heroImage}`;
+          referencedImages.add(normalizedPath);
+          referencedImages.add(normalizedPath.replace(/^\//, ''));
+        }
+        if (post.content) {
+          const imageMatches = post.content.match(/!\[.*?\]\((\/image\/[^)]+)\)/g) || [];
+          for (const match of imageMatches) {
+            const pathMatch = match.match(/\((\/image\/[^)]+)\)/);
+            if (pathMatch) {
+              referencedImages.add(pathMatch[1]);
+              referencedImages.add(pathMatch[1].replace(/^\//, ''));
+            }
+          }
+          const imgTagMatches = post.content.match(/src=["'](\/image\/[^"']+)["']/g) || [];
+          for (const match of imgTagMatches) {
+            const pathMatch = match.match(/src=["'](\/image\/[^"']+)["']/);
+            if (pathMatch) {
+              referencedImages.add(pathMatch[1]);
+              referencedImages.add(pathMatch[1].replace(/^\//, ''));
+            }
+          }
+        }
+      }
+
+      // Check site settings
+      try {
+        const siteSettingsFile = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "src/config/siteSettings.ts",
+          ref: repo.activeBranch,
+        });
+
+        if (!Array.isArray(siteSettingsFile.data) && "content" in siteSettingsFile.data) {
+          const content = Buffer.from(siteSettingsFile.data.content, "base64").toString("utf-8");
+          const settingsImageMatches = content.match(/["'](\/image\/[^"']+)["']/g) || [];
+          for (const match of settingsImageMatches) {
+            const pathMatch = match.match(/["'](\/image\/[^"']+)["']/);
+            if (pathMatch) {
+              referencedImages.add(pathMatch[1]);
+              referencedImages.add(pathMatch[1].replace(/^\//, ''));
+            }
+          }
+        }
+      } catch (e) {
+        // Settings file not found, continue
+      }
+
+      // Filter to only actually unused paths
+      const verifiedUnusedPaths: string[] = [];
+      const stillUsedPaths: string[] = [];
+      
+      for (const imagePath of imagePaths) {
+        const publicPath = imagePath.startsWith('/') ? imagePath : `/${imagePath}`;
+        const isUsed = referencedImages.has(publicPath) || 
+                       referencedImages.has(publicPath.replace(/^\//, ''));
+        
+        if (isUsed) {
+          stillUsedPaths.push(imagePath);
+        } else {
+          verifiedUnusedPaths.push(imagePath);
+        }
+      }
+
+      if (stillUsedPaths.length > 0) {
+        console.warn(`Cleanup blocked ${stillUsedPaths.length} paths that are still in use:`, stillUsedPaths);
+      }
+
+      if (verifiedUnusedPaths.length === 0) {
+        return res.json({
+          success: false,
+          error: "All requested paths are still in use and cannot be deleted",
+          stillUsedPaths,
+        });
       }
 
       if (queueOnly === true) {
-        // Add to Smart Deploy queue
-        const operations: Array<{ type: "delete"; path: string }> = imagePaths.map(imagePath => ({
+        // Add to Smart Deploy queue - use verified paths only
+        const operations: Array<{ type: "delete"; path: string }> = verifiedUnusedPaths.map(imagePath => ({
           type: "delete" as const,
           path: imagePath.startsWith('public/') ? imagePath : `public${imagePath}`,
         }));
@@ -1959,12 +2052,13 @@ export async function registerRoutes(
         const draftChange: DraftChange = {
           id: crypto.randomUUID(),
           type: "image_delete",
-          title: `Delete ${imagePaths.length} unused asset${imagePaths.length > 1 ? 's' : ''}`,
+          title: `Delete ${verifiedUnusedPaths.length} unused asset${verifiedUnusedPaths.length > 1 ? 's' : ''}`,
           path: operations[0].path,
           operations,
           metadata: {
-            deletedPaths: imagePaths,
-            count: imagePaths.length,
+            deletedPaths: verifiedUnusedPaths,
+            count: verifiedUnusedPaths.length,
+            blockedPaths: stillUsedPaths.length > 0 ? stillUsedPaths : undefined,
           },
           createdAt: new Date().toISOString(),
         };
@@ -1974,17 +2068,17 @@ export async function registerRoutes(
         return res.json({
           success: true,
           queued: true,
-          deletedCount: imagePaths.length,
-          message: `Queued ${imagePaths.length} asset${imagePaths.length > 1 ? 's' : ''} for deletion`,
+          deletedCount: verifiedUnusedPaths.length,
+          blockedCount: stillUsedPaths.length,
+          message: `Queued ${verifiedUnusedPaths.length} asset${verifiedUnusedPaths.length > 1 ? 's' : ''} for deletion${stillUsedPaths.length > 0 ? ` (${stillUsedPaths.length} still in use, skipped)` : ''}`,
         });
       }
 
-      // Direct delete (not queued)
-      const octokit = await getGitHubClient();
+      // Direct delete (not queued) - use verified paths only
       let deletedCount = 0;
       const errors: string[] = [];
 
-      for (const imagePath of imagePaths) {
+      for (const imagePath of verifiedUnusedPaths) {
         const repoPath = imagePath.startsWith('public/') ? imagePath : `public${imagePath}`;
         
         try {
@@ -2015,6 +2109,7 @@ export async function registerRoutes(
       res.json({
         success: true,
         deletedCount,
+        blockedCount: stillUsedPaths.length,
         errors: errors.length > 0 ? errors : undefined,
       });
     } catch (error: any) {
