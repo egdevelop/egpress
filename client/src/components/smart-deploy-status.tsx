@@ -31,10 +31,10 @@ export function SmartDeployStatus() {
     queryKey: ["/api/smart-deploy/settings"],
   });
 
+  // Always fetch queue - show deploy button whenever there are pending items
   const { data: queueData } = useQuery<{ success: boolean; data: DraftQueue }>({
     queryKey: ["/api/smart-deploy/queue"],
-    enabled: settingsData?.settings?.enabled ?? false,
-    refetchInterval: 10000,
+    refetchInterval: 5000, // Check more frequently
   });
 
   const deployMutation = useMutation({
@@ -68,10 +68,10 @@ export function SmartDeployStatus() {
     },
   });
 
-  const isEnabled = settingsData?.settings?.enabled ?? false;
   const pendingCount = queueData?.data?.changes?.length || 0;
 
-  if (!isEnabled || pendingCount === 0) {
+  // Show deploy button whenever there are pending items in queue
+  if (pendingCount === 0) {
     return null;
   }
 
