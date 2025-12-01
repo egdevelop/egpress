@@ -93,15 +93,19 @@ The system comprises a React-based frontend and an Express.js backend.
   - Batch image optimizer: drag-drop multiple images, process in queue, download all optimized
   - Custom compression settings: quality slider (10-100%), max dimensions, format selection (WebP/JPEG/PNG)
   - Real-time compression stats showing original vs optimized size and savings
-- **Smart Deploy System (New):**
-  - Draft queue for batching multiple changes before deploying
-  - "Save & Queue" option in post editor to queue changes instead of immediate commit
-  - Pending changes displayed in Vercel page Smart Deploy tab with review/remove options
+- **Smart Deploy System (Enhanced):**
+  - Supports ALL content types: posts, theme, settings, content defaults, static pages, and images
+  - "Save & Queue" dropdown option on all editable pages (Theme, Branding, Content Defaults, Posts)
+  - Draft queue with categorized view: changes grouped by type (Posts, Images, Theme, Settings, Pages)
+  - FileOperation system with write/delete operations for atomic multi-file changes
+  - Delete-before-write semantics for image replacements (cleans up old images when updating)
+  - Change types: post_create, post_update, post_delete, image_upload, image_replace, image_delete, theme_update, settings_update, content_defaults_update, navigation_update, static_page_update
   - Single batch commit: all queued changes deployed in one GitHub commit (one Vercel build)
-  - Toggle to enable/disable Smart Deploy mode
+  - Toggle to enable/disable Smart Deploy mode globally
   - Cost-effective deployment strategy to reduce Vercel build minutes usage
-  - Storage: DraftChange and SmartDeploySettings in shared schema
+  - Storage: DraftChange with operations array, SmartDeploySettings in shared schema
   - API endpoints: GET/POST /api/smart-deploy/settings, GET/POST/DELETE /api/smart-deploy/queue, POST /api/smart-deploy/deploy
+  - All mutating endpoints support queueOnly parameter: PUT /api/theme, PUT /api/site-settings, PUT /api/content-defaults, PUT /api/files/content, POST /api/upload-image-base64
   - Vercel auto-deploy control instructions and ignored build step configuration
 
 ## External Dependencies
