@@ -173,14 +173,17 @@ export default function PerformancePage() {
             img.id === image.id ? { ...img, status: 'skipped', error: 'Already optimized' } : img
           ));
         } else {
-          const mimeType = options.format || 'image/webp';
-          const ext = mimeType === 'image/webp' ? 'webp' : mimeType === 'image/jpeg' ? 'jpg' : 'png';
-          
           const originalPath = image.original.path;
-          const lastSlashIndex = originalPath.lastIndexOf('/');
-          const directory = lastSlashIndex >= 0 ? originalPath.substring(0, lastSlashIndex + 1) : '';
-          const originalName = image.original.name.replace(/\.[^.]+$/, '');
-          const optimizedFilename = `${directory}${originalName}.${ext}`;
+          const originalExt = image.original.name.split('.').pop() || 'webp';
+          
+          const mimeTypeMap: Record<string, string> = {
+            'png': 'image/png',
+            'jpg': 'image/jpeg', 
+            'jpeg': 'image/jpeg',
+            'webp': 'image/webp',
+            'gif': 'image/gif',
+          };
+          const mimeType = mimeTypeMap[originalExt.toLowerCase()] || 'image/webp';
 
           const base64 = optimized.dataUrl.split(',')[1];
           
@@ -189,10 +192,10 @@ export default function PerformancePage() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               imageData: base64,
-              filename: optimizedFilename,
+              filename: originalPath,
               mimeType,
               queueOnly: true,
-              previousPath: image.original.path,
+              previousPath: originalPath,
             }),
             credentials: 'include',
           });

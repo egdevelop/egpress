@@ -1558,10 +1558,23 @@ export async function registerRoutes(
       
       // Check if filename contains a full path (for image replacement)
       if (filename && filename.includes('/')) {
+        // Security: sanitize path to prevent traversal attacks
+        const sanitizedPath = filename
+          .replace(/\.\./g, '')           // Remove ..
+          .replace(/\/\//g, '/')          // Remove double slashes
+          .replace(/^\/+/, '');           // Remove leading slashes
+        
+        // Ensure path stays within public/image directory for safety
+        if (!sanitizedPath.startsWith('public/image/') && !sanitizedPath.startsWith('image/')) {
+          return res.status(400).json({ 
+            success: false, 
+            error: "Invalid image path - must be within public/image directory" 
+          });
+        }
+        
         // Filename contains a path - use it directly for replacement
-        // Extract just the filename portion for display
-        filePath = filename.startsWith('public/') ? filename : `public/${filename}`;
-        finalFilename = filename.split('/').pop() || filename;
+        filePath = sanitizedPath.startsWith('public/') ? sanitizedPath : `public/${sanitizedPath}`;
+        finalFilename = sanitizedPath.split('/').pop() || sanitizedPath;
       } else {
         // Generate unique filename for new uploads
         const baseName = filename || `ai-hero-image`;
