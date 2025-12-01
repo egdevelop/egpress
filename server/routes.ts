@@ -1366,8 +1366,12 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      // If queueOnly is true, add to draft queue instead of committing
-      if (queueOnly === true) {
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly === true || smartDeployActive;
+
+      // If queue mode, add to draft queue instead of committing
+      if (shouldQueue) {
         const filename = path.split("/").pop() || path;
         const isStaticPage = path.startsWith("src/pages/");
         
@@ -1657,8 +1661,12 @@ export async function registerRoutes(
       // Return the public path
       const publicPath = `/image/${finalFilename}`;
       
-      // If queueOnly mode, add to draft queue instead of committing
-      if (queueOnly === true) {
+      // Check if Smart Deploy is active - if so, force queue mode
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly === true || smartDeployActive;
+      
+      // If queue mode, add to draft queue instead of committing
+      if (shouldQueue) {
         // Determine change type based on whether we're replacing an existing image
         // forceReplacement is used when optimizing existing images (same path replacement)
         const isReplacement = forceReplacement || (previousPath && previousPath !== publicPath);
