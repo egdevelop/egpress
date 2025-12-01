@@ -93,9 +93,15 @@ The system comprises a React-based frontend and an Express.js backend.
   - Batch image optimizer: drag-drop multiple images, process in queue, download all optimized
   - Custom compression settings: quality slider (10-100%), max dimensions, format selection (WebP/JPEG/PNG)
   - Real-time compression stats showing original vs optimized size and savings
-  - Smart Deploy tab with deployment strategy guidance
-  - Deployment batching toggle for efficient Vercel builds
-  - Step-by-step deployment workflow: bulk create → review → single deploy
+- **Smart Deploy System (New):**
+  - Draft queue for batching multiple changes before deploying
+  - "Save & Queue" option in post editor to queue changes instead of immediate commit
+  - Pending changes displayed in Vercel page Smart Deploy tab with review/remove options
+  - Single batch commit: all queued changes deployed in one GitHub commit (one Vercel build)
+  - Toggle to enable/disable Smart Deploy mode
+  - Cost-effective deployment strategy to reduce Vercel build minutes usage
+  - Storage: DraftChange and SmartDeploySettings in shared schema
+  - API endpoints: GET/POST /api/smart-deploy/settings, GET/POST/DELETE /api/smart-deploy/queue, POST /api/smart-deploy/deploy
   - Vercel auto-deploy control instructions and ignored build step configuration
 
 ## External Dependencies

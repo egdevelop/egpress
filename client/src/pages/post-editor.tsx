@@ -52,6 +52,13 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { 
   ArrowLeft, 
   Save, 
@@ -70,8 +77,11 @@ import {
   CheckCircle,
   AlertTriangle,
   AlertCircle,
-  Loader2
+  Loader2,
+  Clock,
+  ChevronDown,
 } from "lucide-react";
+import type { SmartDeploySettings } from "@shared/schema";
 import { Link } from "wouter";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -294,6 +304,12 @@ export default function PostEditor() {
     enabled: !!slug && !!repoData?.data,
   });
 
+  const { data: smartDeployData } = useQuery<{ success: boolean; settings: SmartDeploySettings }>({
+    queryKey: ["/api/smart-deploy/settings"],
+  });
+
+  const smartDeployEnabled = smartDeployData?.settings?.enabled ?? false;
+
   const [defaultPubDate] = useState(() => new Date().toISOString());
   
   const form = useForm<PostFormValues>({
@@ -402,8 +418,70 @@ export default function PostEditor() {
     },
   });
 
+  const queueMutation = useMutation({
+    mutationFn: async (data: PostFormValues) => {
+      const url = isNew ? "/api/posts" : `/api/posts/${slug}`;
+      const method = isNew ? "POST" : "PUT";
+      
+      let finalPubDate: string;
+      const currentTime = new Date().toISOString().split("T")[1];
+      
+      const hasValidTime = (dateStr: string): boolean => {
+        if (!dateStr.includes("T")) return false;
+        const timePart = dateStr.split("T")[1];
+        return timePart && !timePart.startsWith("00:00:00");
+      };
+      
+      if (originalPubDate && hasValidTime(originalPubDate)) {
+        const originalDatePart = originalPubDate.split("T")[0];
+        if (data.pubDate === originalDatePart) {
+          finalPubDate = originalPubDate;
+        } else {
+          finalPubDate = new Date(data.pubDate + "T" + currentTime).toISOString();
+        }
+      } else {
+        finalPubDate = new Date(data.pubDate + "T" + currentTime).toISOString();
+      }
+      
+      const response = await apiRequest(method, url, {
+        ...data,
+        pubDate: finalPubDate,
+        commitMessage: commitMessage || `${isNew ? "Create" : "Update"} post: ${data.title}`,
+        queueOnly: true,
+      });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "Added to Queue",
+          description: `${data.queueCount} pending change${data.queueCount > 1 ? 's' : ''} - go to Vercel page to deploy`,
+        });
+        queryClient.invalidateQueries({ queryKey: ["/api/smart-deploy/queue"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/posts"] });
+      } else {
+        toast({
+          title: "Queue Failed",
+          description: data.error || "Failed to queue change",
+          variant: "destructive",
+        });
+      }
+    },
+    onError: () => {
+      toast({
+        title: "Queue Failed",
+        description: "An error occurred while queuing",
+        variant: "destructive",
+      });
+    },
+  });
+
   const onSubmit = (data: PostFormValues) => {
     saveMutation.mutate(data);
+  };
+
+  const onQueue = (data: PostFormValues) => {
+    queueMutation.mutate(data);
   };
 
   const handleOptimizeImage = useCallback(async () => {
@@ -681,23 +759,78 @@ export default function PostEditor() {
             </Dialog>
           )}
 
-          <Button
-            onClick={form.handleSubmit(onSubmit)}
-            disabled={saveMutation.isPending}
-            data-testid="button-save-post"
-          >
-            {saveMutation.isPending ? (
-              <>
-                <GitCommit className="w-4 h-4 mr-2 animate-pulse" />
-                Saving...
-              </>
-            ) : (
-              <>
-                <Save className="w-4 h-4 mr-2" />
-                {isNew ? "Create" : "Save"} & Commit
-              </>
-            )}
-          </Button>
+          {smartDeployEnabled ? (
+            <div className="flex">
+              <Button
+                onClick={form.handleSubmit(onSubmit)}
+                disabled={saveMutation.isPending || queueMutation.isPending}
+                className="rounded-r-none"
+                data-testid="button-save-post"
+              >
+                {saveMutation.isPending ? (
+                  <>
+                    <GitCommit className="w-4 h-4 mr-2 animate-pulse" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    {isNew ? "Create" : "Save"} & Commit
+                  </>
+                )}
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="default"
+                    size="icon"
+                    className="rounded-l-none border-l border-l-primary-foreground/20"
+                    disabled={saveMutation.isPending || queueMutation.isPending}
+                    data-testid="button-save-dropdown"
+                  >
+                    <ChevronDown className="w-4 h-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    onClick={form.handleSubmit(onSubmit)}
+                    disabled={saveMutation.isPending}
+                    data-testid="menu-save-commit"
+                  >
+                    <GitCommit className="w-4 h-4 mr-2" />
+                    {isNew ? "Create" : "Save"} & Commit Now
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onClick={form.handleSubmit(onQueue)}
+                    disabled={queueMutation.isPending}
+                    data-testid="menu-save-queue"
+                  >
+                    <Clock className="w-4 h-4 mr-2" />
+                    {queueMutation.isPending ? "Queuing..." : "Save & Queue for Batch Deploy"}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          ) : (
+            <Button
+              onClick={form.handleSubmit(onSubmit)}
+              disabled={saveMutation.isPending}
+              data-testid="button-save-post"
+            >
+              {saveMutation.isPending ? (
+                <>
+                  <GitCommit className="w-4 h-4 mr-2 animate-pulse" />
+                  Saving...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  {isNew ? "Create" : "Save"} & Commit
+                </>
+              )}
+            </Button>
+          )}
         </div>
       </div>
 

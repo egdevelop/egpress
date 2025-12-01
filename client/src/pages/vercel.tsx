@@ -79,7 +79,11 @@ import {
 import { SiVercel } from "react-icons/si";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
-import type { Repository, VercelProject, VercelDeployment, VercelDomain } from "@shared/schema";
+import type { Repository, VercelProject, VercelDeployment, VercelDomain, DraftQueue, SmartDeploySettings } from "@shared/schema";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { FileText, Pencil, ImageIcon, Palette, File } from "lucide-react";
 
 const tokenSchema = z.object({
   token: z.string().min(1, "Vercel token is required"),
@@ -129,6 +133,21 @@ export default function VercelPage() {
     queryKey: ["/api/vercel/domains"],
     enabled: !!configData?.data?.project,
   });
+
+  // Smart Deploy queries
+  const { data: smartDeploySettingsData, refetch: refetchSettings } = useQuery<{ success: boolean; settings: SmartDeploySettings }>({
+    queryKey: ["/api/smart-deploy/settings"],
+  });
+
+  const { data: draftQueueData, refetch: refetchQueue } = useQuery<{ success: boolean; queue: DraftQueue | null }>({
+    queryKey: ["/api/smart-deploy/queue"],
+  });
+
+  const [deployCommitMessage, setDeployCommitMessage] = useState("");
+
+  const smartDeploySettings = smartDeploySettingsData?.settings;
+  const draftQueue = draftQueueData?.queue;
+  const pendingChangesCount = draftQueue?.changes?.length || 0;
 
   const tokenForm = useForm({
     resolver: zodResolver(tokenSchema),
@@ -316,6 +335,98 @@ export default function VercelPage() {
       refetchDomains();
     },
   });
+
+  // Smart Deploy mutations
+  const updateSmartDeploySettingsMutation = useMutation({
+    mutationFn: async (settings: Partial<SmartDeploySettings>) => {
+      const response = await apiRequest("POST", "/api/smart-deploy/settings", settings);
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchSettings();
+      toast({ title: "Settings Updated" });
+    },
+  });
+
+  const removeFromQueueMutation = useMutation({
+    mutationFn: async (changeId: string) => {
+      const response = await apiRequest("DELETE", `/api/smart-deploy/queue/${changeId}`);
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchQueue();
+      toast({ title: "Change Removed" });
+    },
+  });
+
+  const clearQueueMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiRequest("DELETE", "/api/smart-deploy/queue");
+      return response.json();
+    },
+    onSuccess: () => {
+      refetchQueue();
+      toast({ title: "Queue Cleared" });
+    },
+  });
+
+  const deployQueueMutation = useMutation({
+    mutationFn: async (commitMessage?: string) => {
+      const response = await apiRequest("POST", "/api/smart-deploy/deploy", { commitMessage });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({ 
+          title: "Deployed Successfully", 
+          description: data.message,
+        });
+        refetchQueue();
+        setDeployCommitMessage("");
+        // Refresh deployments if Vercel is connected
+        if (configData?.data?.project) {
+          refetchDeployments();
+        }
+      } else {
+        toast({ 
+          title: "Deploy Failed", 
+          description: data.error,
+          variant: "destructive",
+        });
+      }
+    },
+  });
+
+  const getChangeTypeIcon = (type: string) => {
+    switch (type) {
+      case "post_create":
+        return <FileText className="w-4 h-4 text-green-500" />;
+      case "post_update":
+        return <Pencil className="w-4 h-4 text-blue-500" />;
+      case "post_delete":
+        return <Trash2 className="w-4 h-4 text-red-500" />;
+      case "image_upload":
+        return <ImageIcon className="w-4 h-4 text-purple-500" />;
+      case "theme_update":
+        return <Palette className="w-4 h-4 text-orange-500" />;
+      case "settings_update":
+        return <Settings className="w-4 h-4 text-gray-500" />;
+      default:
+        return <File className="w-4 h-4 text-gray-500" />;
+    }
+  };
+
+  const getChangeTypeLabel = (type: string) => {
+    switch (type) {
+      case "post_create": return "New Post";
+      case "post_update": return "Edit Post";
+      case "post_delete": return "Delete Post";
+      case "image_upload": return "Image";
+      case "theme_update": return "Theme";
+      case "settings_update": return "Settings";
+      default: return "File";
+    }
+  };
 
   const config = configData?.data;
   const project = config?.project;
@@ -1223,45 +1334,174 @@ export default function VercelPage() {
                 </TabsContent>
 
                 <TabsContent value="smart-deploy" className="space-y-6">
+                  {/* Pending Changes Queue */}
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between gap-4">
+                        <div>
+                          <CardTitle className="flex items-center gap-2">
+                            <Clock className="w-5 h-5" />
+                            Pending Changes
+                            {pendingChangesCount > 0 && (
+                              <Badge variant="secondary">{pendingChangesCount}</Badge>
+                            )}
+                          </CardTitle>
+                          <CardDescription>
+                            Queue multiple changes and deploy them all at once
+                          </CardDescription>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            checked={smartDeploySettings?.enabled ?? true}
+                            onCheckedChange={(checked) => 
+                              updateSmartDeploySettingsMutation.mutate({ enabled: checked })
+                            }
+                            data-testid="switch-smart-deploy-enabled"
+                          />
+                          <span className="text-sm text-muted-foreground">Smart Deploy</span>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {pendingChangesCount === 0 ? (
+                        <div className="text-center py-8 text-muted-foreground">
+                          <Clock className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                          <p className="font-medium">No pending changes</p>
+                          <p className="text-sm mt-1">
+                            {smartDeploySettings?.enabled 
+                              ? "Use 'Save & Queue' when editing posts to queue changes here"
+                              : "Enable Smart Deploy to start queuing changes"}
+                          </p>
+                        </div>
+                      ) : (
+                        <>
+                          <ScrollArea className="h-[300px] pr-4">
+                            <div className="space-y-2">
+                              {draftQueue?.changes.map((change) => (
+                                <div 
+                                  key={change.id}
+                                  className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/30"
+                                  data-testid={`queue-item-${change.id}`}
+                                >
+                                  <div className="flex items-center gap-3 min-w-0">
+                                    {getChangeTypeIcon(change.type)}
+                                    <div className="min-w-0">
+                                      <p className="font-medium text-sm truncate">{change.title}</p>
+                                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <Badge variant="outline" className="text-xs">
+                                          {getChangeTypeLabel(change.type)}
+                                        </Badge>
+                                        <span className="truncate">{change.path}</span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    onClick={() => removeFromQueueMutation.mutate(change.id)}
+                                    disabled={removeFromQueueMutation.isPending}
+                                    data-testid={`button-remove-change-${change.id}`}
+                                  >
+                                    <X className="w-4 h-4" />
+                                  </Button>
+                                </div>
+                              ))}
+                            </div>
+                          </ScrollArea>
+
+                          <Separator />
+
+                          <div className="space-y-3">
+                            <div>
+                              <label className="text-sm font-medium">Commit Message</label>
+                              <Textarea
+                                placeholder={`Batch update: ${pendingChangesCount} change${pendingChangesCount > 1 ? 's' : ''}`}
+                                value={deployCommitMessage}
+                                onChange={(e) => setDeployCommitMessage(e.target.value)}
+                                className="mt-1.5"
+                                data-testid="input-commit-message"
+                              />
+                            </div>
+
+                            <div className="flex items-center justify-between gap-4">
+                              <Button
+                                variant="outline"
+                                onClick={() => clearQueueMutation.mutate()}
+                                disabled={clearQueueMutation.isPending}
+                                data-testid="button-clear-queue"
+                              >
+                                {clearQueueMutation.isPending ? (
+                                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                ) : (
+                                  <Trash2 className="w-4 h-4 mr-2" />
+                                )}
+                                Clear All
+                              </Button>
+                              <Button
+                                onClick={() => deployQueueMutation.mutate(deployCommitMessage || undefined)}
+                                disabled={deployQueueMutation.isPending}
+                                data-testid="button-deploy-queue"
+                              >
+                                {deployQueueMutation.isPending ? (
+                                  <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                                ) : (
+                                  <Rocket className="w-4 h-4 mr-2" />
+                                )}
+                                Deploy {pendingChangesCount} Change{pendingChangesCount > 1 ? 's' : ''}
+                              </Button>
+                            </div>
+                          </div>
+                        </>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  {/* How It Works */}
                   <div className="grid gap-6 lg:grid-cols-2">
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
-                          <Settings className="w-5 h-5" />
-                          Deployment Settings
+                          <Info className="w-5 h-5" />
+                          How Smart Deploy Works
                         </CardTitle>
-                        <CardDescription>
-                          Control how and when deployments happen
-                        </CardDescription>
                       </CardHeader>
-                      <CardContent className="space-y-6">
+                      <CardContent className="space-y-4">
                         <div className="space-y-3">
-                          <h4 className="text-sm font-medium">Deployment Tips</h4>
-                          <div className="space-y-2 text-sm text-muted-foreground">
-                            <div className="flex items-start gap-2">
-                              <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                              <span>Create multiple posts with Bulk AI Generator before deploying</span>
+                          <div className="flex items-start gap-3">
+                            <Badge variant="secondary" className="shrink-0">1</Badge>
+                            <div>
+                              <p className="font-medium text-sm">Create Content</p>
+                              <p className="text-xs text-muted-foreground">
+                                When editing posts, use "Save & Queue" instead of regular save
+                              </p>
                             </div>
-                            <div className="flex items-start gap-2">
-                              <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                              <span>Edit all theme/branding settings at once, then deploy</span>
+                          </div>
+                          <div className="flex items-start gap-3">
+                            <Badge variant="secondary" className="shrink-0">2</Badge>
+                            <div>
+                              <p className="font-medium text-sm">Queue Changes</p>
+                              <p className="text-xs text-muted-foreground">
+                                All changes are stored locally until you're ready to deploy
+                              </p>
                             </div>
-                            <div className="flex items-start gap-2">
-                              <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                              <span>Use scheduled deploys for content calendars</span>
+                          </div>
+                          <div className="flex items-start gap-3">
+                            <Badge variant="secondary" className="shrink-0">3</Badge>
+                            <div>
+                              <p className="font-medium text-sm">Single Deploy</p>
+                              <p className="text-xs text-muted-foreground">
+                                Deploy all changes in one commit, triggering only one Vercel build
+                              </p>
                             </div>
                           </div>
                         </div>
 
-                        <div className="p-4 rounded-lg bg-muted/30 border">
-                          <div className="flex items-center gap-3">
-                            <Info className="w-5 h-5 text-muted-foreground" />
-                            <div>
-                              <p className="text-sm font-medium">Smart Deploy Strategy</p>
-                              <p className="text-xs text-muted-foreground mt-1">
-                                Collect multiple changes before deploying to reduce Vercel build minutes usage and bundle posts into one deployment.
-                              </p>
-                            </div>
+                        <div className="p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+                          <div className="flex items-start gap-2">
+                            <Check className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                            <p className="text-sm text-green-700 dark:text-green-400">
+                              Save on Vercel build minutes by batching multiple changes into one deployment
+                            </p>
                           </div>
                         </div>
                       </CardContent>
@@ -1270,101 +1510,44 @@ export default function VercelPage() {
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center gap-2">
-                          <Clock className="w-5 h-5" />
-                          Deployment Strategy
+                          <Settings className="w-5 h-5" />
+                          Vercel Auto-Deploy Control
                         </CardTitle>
                         <CardDescription>
-                          Best practices for efficient deployments
+                          Configure Vercel to avoid unwanted auto-deploys
                         </CardDescription>
                       </CardHeader>
                       <CardContent className="space-y-4">
-                        <div className="space-y-3">
-                          <div className="p-4 rounded-md border bg-muted/30">
-                            <h4 className="font-medium flex items-center gap-2 mb-2">
-                              <Badge variant="secondary">1</Badge>
-                              Bulk Create Content
-                            </h4>
-                            <p className="text-sm text-muted-foreground">
-                              Use the Bulk AI Generator to create 5-10 posts at once. 
-                              All posts are saved to GitHub but not deployed yet.
-                            </p>
+                        <div className="space-y-2 text-sm text-muted-foreground">
+                          <div className="flex items-start gap-2">
+                            <span className="text-primary font-medium shrink-0">1.</span>
+                            <span>Go to Vercel Dashboard, select your project</span>
                           </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-primary font-medium shrink-0">2.</span>
+                            <span>Settings and Git and Build & Development</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-primary font-medium shrink-0">3.</span>
+                            <span>Turn off "Automatically deploy on push"</span>
+                          </div>
+                          <div className="flex items-start gap-2">
+                            <span className="text-primary font-medium shrink-0">4.</span>
+                            <span>Use the Deploy button here when ready</span>
+                          </div>
+                        </div>
 
-                          <div className="p-4 rounded-md border bg-muted/30">
-                            <h4 className="font-medium flex items-center gap-2 mb-2">
-                              <Badge variant="secondary">2</Badge>
-                              Review & Organize
-                            </h4>
-                            <p className="text-sm text-muted-foreground">
-                              Edit titles, adjust categories, and finalize content. 
-                              Changes are committed to GitHub incrementally.
-                            </p>
-                          </div>
-
-                          <div className="p-4 rounded-md border bg-muted/30">
-                            <h4 className="font-medium flex items-center gap-2 mb-2">
-                              <Badge variant="secondary">3</Badge>
-                              Single Deploy
-                            </h4>
-                            <p className="text-sm text-muted-foreground">
-                              When ready, use the "Deploy Now" button above. 
-                              All your changes go live together.
-                            </p>
-                          </div>
+                        <div className="p-3 rounded-lg bg-muted/50 border">
+                          <p className="text-xs text-muted-foreground">
+                            Or add this Ignored Build Step command to skip deploys:
+                          </p>
+                          <code className="block mt-2 p-2 rounded bg-background text-xs font-mono overflow-x-auto">
+                            git diff HEAD^ HEAD --quiet -- src/content/blog/
+                          </code>
                         </div>
                       </CardContent>
                     </Card>
                   </div>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center gap-2">
-                        <Rocket className="w-5 h-5" />
-                        Vercel Auto-Deploy Control
-                      </CardTitle>
-                      <CardDescription>
-                        How to control automatic deployments in Vercel
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="grid gap-4 md:grid-cols-2">
-                        <div className="p-4 rounded-md border">
-                          <h4 className="font-medium mb-2">Disable Auto-Deploy</h4>
-                          <ol className="text-sm text-muted-foreground space-y-2">
-                            <li className="flex gap-2">
-                              <span className="text-primary font-medium">1.</span>
-                              Go to Vercel Dashboard and select your Project
-                            </li>
-                            <li className="flex gap-2">
-                              <span className="text-primary font-medium">2.</span>
-                              Settings then Git then Build & Development
-                            </li>
-                            <li className="flex gap-2">
-                              <span className="text-primary font-medium">3.</span>
-                              Turn off "Automatically deploy on push"
-                            </li>
-                            <li className="flex gap-2">
-                              <span className="text-primary font-medium">4.</span>
-                              Use "Deploy Now" button in Deployments tab
-                            </li>
-                          </ol>
-                        </div>
-
-                        <div className="p-4 rounded-md border">
-                          <h4 className="font-medium mb-2">Ignored Build Step</h4>
-                          <p className="text-sm text-muted-foreground mb-3">
-                            Add this to Vercel settings to skip deploys for drafts:
-                          </p>
-                          <code className="block p-2 rounded bg-muted text-xs font-mono">
-                            git diff HEAD^ HEAD --quiet -- src/content/blog/
-                          </code>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            This skips deploy if only draft posts changed.
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
                 </TabsContent>
 
                 <TabsContent value="settings">

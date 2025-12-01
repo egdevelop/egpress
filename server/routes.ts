@@ -1025,23 +1025,11 @@ export async function registerRoutes(
         return res.json({ success: false, error: "No repository connected" });
       }
 
-      const { slug, title, description, pubDate, heroImage, author, category, tags, draft, featured, content, commitMessage } = req.body;
+      const { slug, title, description, pubDate, heroImage, author, category, tags, draft, featured, content, commitMessage, queueOnly } = req.body;
       
       const path = `src/content/blog/${slug}.md`;
       const fileContent = generatePostContent({
         slug, title, description, pubDate, heroImage, author, category, tags, draft, featured, content
-      });
-
-      const octokit = await getGitHubClient();
-
-      // Create or update file
-      await octokit.repos.createOrUpdateFileContents({
-        owner: repo.owner,
-        repo: repo.name,
-        path,
-        message: commitMessage || `Create post: ${title}`,
-        content: Buffer.from(fileContent).toString("base64"),
-        branch: repo.activeBranch,
       });
 
       // Build new raw frontmatter for the new post
@@ -1068,12 +1056,46 @@ export async function registerRoutes(
         rawFrontmatter: newRawFrontmatter,
       };
 
-      // Update cache
-      const posts = await storage.getPosts();
-      posts.push(newPost);
-      await storage.setPosts(posts);
+      // Check if we should queue instead of commit
+      if (queueOnly) {
+        // Add to draft queue instead of committing
+        await storage.addDraftChange({
+          id: crypto.randomUUID(),
+          type: "post_create",
+          title: `Create post: ${title}`,
+          path,
+          content: fileContent,
+          metadata: { commitMessage: commitMessage || `Create post: ${title}` },
+          createdAt: new Date().toISOString(),
+        });
 
-      res.json({ success: true, data: newPost });
+        // Update cache to reflect the pending change
+        const posts = await storage.getPosts();
+        posts.push(newPost);
+        await storage.setPosts(posts);
+
+        const queue = await storage.getDraftQueue();
+        res.json({ success: true, data: newPost, queued: true, queueCount: queue?.changes.length || 0 });
+      } else {
+        const octokit = await getGitHubClient();
+
+        // Create or update file
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path,
+          message: commitMessage || `Create post: ${title}`,
+          content: Buffer.from(fileContent).toString("base64"),
+          branch: repo.activeBranch,
+        });
+
+        // Update cache
+        const posts = await storage.getPosts();
+        posts.push(newPost);
+        await storage.setPosts(posts);
+
+        res.json({ success: true, data: newPost });
+      }
     } catch (error: any) {
       console.error("Create post error:", error);
       res.json({ success: false, error: error.message || "Failed to create post" });
@@ -1093,38 +1115,14 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Post not found" });
       }
 
-      const { title, description, pubDate, heroImage, author, category, tags, draft, featured, content, commitMessage } = req.body;
+      const { title, description, pubDate, heroImage, author, category, tags, draft, featured, content, commitMessage, queueOnly } = req.body;
       
       // Pass original frontmatter to preserve structure (author as object, custom fields)
       const fileContent = generatePostContent({
         slug: req.params.slug, title, description, pubDate, heroImage, author, category, tags, draft, featured, content
       }, existingPost.rawFrontmatter);
 
-      const octokit = await getGitHubClient();
-
-      // Get current file SHA
-      const { data: currentFile } = await octokit.repos.getContent({
-        owner: repo.owner,
-        repo: repo.name,
-        path: existingPost.path,
-        ref: repo.activeBranch,
-      });
-
-      const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
-
-      // Update file
-      await octokit.repos.createOrUpdateFileContents({
-        owner: repo.owner,
-        repo: repo.name,
-        path: existingPost.path,
-        message: commitMessage || `Update post: ${title}`,
-        content: Buffer.from(fileContent).toString("base64"),
-        sha,
-        branch: repo.activeBranch,
-      });
-
       // Rebuild rawFrontmatter based on what was actually written
-      // Parse the generated content to get the actual frontmatter
       const { data: newFrontmatter } = matter(fileContent);
       const updatedRawFrontmatter: Record<string, any> = {};
       for (const key of Object.keys(newFrontmatter)) {
@@ -1148,15 +1146,63 @@ export async function registerRoutes(
         rawFrontmatter: updatedRawFrontmatter,
       };
 
-      // Update cache
-      const posts = await storage.getPosts();
-      const postIndex = posts.findIndex(p => p.slug === req.params.slug);
-      if (postIndex >= 0) {
-        posts[postIndex] = updatedPost;
-        await storage.setPosts(posts);
-      }
+      // Check if we should queue instead of commit
+      if (queueOnly) {
+        // Add to draft queue instead of committing
+        await storage.addDraftChange({
+          id: crypto.randomUUID(),
+          type: "post_update",
+          title: `Update post: ${title}`,
+          path: existingPost.path,
+          content: fileContent,
+          metadata: { commitMessage: commitMessage || `Update post: ${title}` },
+          createdAt: new Date().toISOString(),
+        });
 
-      res.json({ success: true, data: updatedPost });
+        // Update cache to reflect the pending change
+        const posts = await storage.getPosts();
+        const postIndex = posts.findIndex(p => p.slug === req.params.slug);
+        if (postIndex >= 0) {
+          posts[postIndex] = updatedPost;
+          await storage.setPosts(posts);
+        }
+
+        const queue = await storage.getDraftQueue();
+        res.json({ success: true, data: updatedPost, queued: true, queueCount: queue?.changes.length || 0 });
+      } else {
+        const octokit = await getGitHubClient();
+
+        // Get current file SHA
+        const { data: currentFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: existingPost.path,
+          ref: repo.activeBranch,
+        });
+
+        const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+
+        // Update file
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: existingPost.path,
+          message: commitMessage || `Update post: ${title}`,
+          content: Buffer.from(fileContent).toString("base64"),
+          sha,
+          branch: repo.activeBranch,
+        });
+
+        // Update cache
+        const posts = await storage.getPosts();
+        const postIndex = posts.findIndex(p => p.slug === req.params.slug);
+        if (postIndex >= 0) {
+          posts[postIndex] = updatedPost;
+          await storage.setPosts(posts);
+        }
+
+        res.json({ success: true, data: updatedPost });
+      }
     } catch (error: any) {
       console.error("Update post error:", error);
       res.json({ success: false, error: error.message || "Failed to update post" });
@@ -1176,33 +1222,55 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Post not found" });
       }
 
-      const octokit = await getGitHubClient();
+      const { queueOnly } = req.query;
 
-      // Get current file SHA
-      const { data: currentFile } = await octokit.repos.getContent({
-        owner: repo.owner,
-        repo: repo.name,
-        path: existingPost.path,
-        ref: repo.activeBranch,
-      });
+      // Check if we should queue instead of commit
+      if (queueOnly === 'true') {
+        // Add to draft queue instead of committing
+        await storage.addDraftChange({
+          id: crypto.randomUUID(),
+          type: "post_delete",
+          title: `Delete post: ${existingPost.title}`,
+          path: existingPost.path,
+          metadata: { commitMessage: `Delete post: ${existingPost.title}` },
+          createdAt: new Date().toISOString(),
+        });
 
-      const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+        // Update cache to reflect the pending change
+        const posts = await storage.getPosts();
+        await storage.setPosts(posts.filter(p => p.slug !== req.params.slug));
 
-      // Delete file
-      await octokit.repos.deleteFile({
-        owner: repo.owner,
-        repo: repo.name,
-        path: existingPost.path,
-        message: `Delete post: ${existingPost.title}`,
-        sha: sha!,
-        branch: repo.activeBranch,
-      });
+        const queue = await storage.getDraftQueue();
+        res.json({ success: true, queued: true, queueCount: queue?.changes.length || 0 });
+      } else {
+        const octokit = await getGitHubClient();
 
-      // Update cache
-      const posts = await storage.getPosts();
-      await storage.setPosts(posts.filter(p => p.slug !== req.params.slug));
+        // Get current file SHA
+        const { data: currentFile } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: existingPost.path,
+          ref: repo.activeBranch,
+        });
 
-      res.json({ success: true });
+        const sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+
+        // Delete file
+        await octokit.repos.deleteFile({
+          owner: repo.owner,
+          repo: repo.name,
+          path: existingPost.path,
+          message: `Delete post: ${existingPost.title}`,
+          sha: sha!,
+          branch: repo.activeBranch,
+        });
+
+        // Update cache
+        const posts = await storage.getPosts();
+        await storage.setPosts(posts.filter(p => p.slug !== req.params.slug));
+
+        res.json({ success: true });
+      }
     } catch (error: any) {
       console.error("Delete post error:", error);
       res.json({ success: false, error: error.message || "Failed to delete post" });
@@ -5107,6 +5175,198 @@ ${urls.map(url => `  <url>
       });
     } catch (error: any) {
       console.error("Commit verification file error:", error);
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // ============ Smart Deploy Draft Queue ============
+
+  // Get Smart Deploy settings
+  app.get("/api/smart-deploy/settings", requireAuth, async (req, res) => {
+    try {
+      const settings = await storage.getSmartDeploySettings();
+      res.json({ success: true, settings });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Update Smart Deploy settings
+  app.post("/api/smart-deploy/settings", requireAuth, async (req, res) => {
+    try {
+      const { enabled, autoQueueChanges } = req.body;
+      await storage.setSmartDeploySettings({ 
+        enabled: enabled ?? true, 
+        autoQueueChanges: autoQueueChanges ?? true 
+      });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Get draft queue (pending changes)
+  app.get("/api/smart-deploy/queue", requireAuth, async (req, res) => {
+    try {
+      const queue = await storage.getDraftQueue();
+      res.json({ success: true, queue });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Add a change to the draft queue
+  app.post("/api/smart-deploy/queue", requireAuth, async (req, res) => {
+    try {
+      const { type, title, path, content, previousContent, metadata } = req.body;
+      
+      const change = {
+        id: crypto.randomUUID(),
+        type,
+        title,
+        path,
+        content,
+        previousContent,
+        metadata,
+        createdAt: new Date().toISOString(),
+      };
+      
+      await storage.addDraftChange(change);
+      const queue = await storage.getDraftQueue();
+      res.json({ success: true, change, queueCount: queue?.changes.length || 0 });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Remove a specific change from the queue
+  app.delete("/api/smart-deploy/queue/:changeId", requireAuth, async (req, res) => {
+    try {
+      const { changeId } = req.params;
+      await storage.removeDraftChange(changeId);
+      const queue = await storage.getDraftQueue();
+      res.json({ success: true, queueCount: queue?.changes.length || 0 });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Clear all pending changes
+  app.delete("/api/smart-deploy/queue", requireAuth, async (req, res) => {
+    try {
+      await storage.clearDraftQueue();
+      res.json({ success: true });
+    } catch (error: any) {
+      res.json({ success: false, error: error.message });
+    }
+  });
+
+  // Deploy all queued changes in a single commit
+  app.post("/api/smart-deploy/deploy", requireAuth, async (req, res) => {
+    try {
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const queue = await storage.getDraftQueue();
+      if (!queue || queue.changes.length === 0) {
+        return res.json({ success: false, error: "No pending changes to deploy" });
+      }
+
+      const octokit = await getGitHubClient();
+      const { commitMessage } = req.body;
+      const message = commitMessage || `Batch update: ${queue.changes.length} change${queue.changes.length > 1 ? 's' : ''}`;
+
+      // Get the current branch reference
+      const { data: ref } = await octokit.git.getRef({
+        owner: repo.owner,
+        repo: repo.name,
+        ref: `heads/${repo.activeBranch}`,
+      });
+      const latestCommitSha = ref.object.sha;
+
+      // Get the tree SHA from the latest commit
+      const { data: commit } = await octokit.git.getCommit({
+        owner: repo.owner,
+        repo: repo.name,
+        commit_sha: latestCommitSha,
+      });
+      const baseTreeSha = commit.tree.sha;
+
+      // Build tree entries for all changes
+      const treeEntries: Array<{
+        path: string;
+        mode: "100644";
+        type: "blob";
+        content?: string;
+        sha?: string | null;
+      }> = [];
+
+      for (const change of queue.changes) {
+        if (change.type === "post_delete") {
+          // For deletions, set sha to null to remove the file
+          treeEntries.push({
+            path: change.path,
+            mode: "100644",
+            type: "blob",
+            sha: null,
+          });
+        } else if (change.content) {
+          // For creates/updates, add the new content
+          treeEntries.push({
+            path: change.path,
+            mode: "100644",
+            type: "blob",
+            content: change.content,
+          });
+        }
+      }
+
+      if (treeEntries.length === 0) {
+        return res.json({ success: false, error: "No valid changes to commit" });
+      }
+
+      // Create a new tree with all changes
+      const { data: newTree } = await octokit.git.createTree({
+        owner: repo.owner,
+        repo: repo.name,
+        base_tree: baseTreeSha,
+        tree: treeEntries as any,
+      });
+
+      // Create a new commit
+      const { data: newCommit } = await octokit.git.createCommit({
+        owner: repo.owner,
+        repo: repo.name,
+        message,
+        tree: newTree.sha,
+        parents: [latestCommitSha],
+      });
+
+      // Update the branch reference to point to the new commit
+      await octokit.git.updateRef({
+        owner: repo.owner,
+        repo: repo.name,
+        ref: `heads/${repo.activeBranch}`,
+        sha: newCommit.sha,
+      });
+
+      // Clear the queue after successful deploy
+      const deployedCount = queue.changes.length;
+      await storage.clearDraftQueue();
+
+      // Sync repository data to reflect changes
+      await syncRepositoryData(repo.owner, repo.name, repo.activeBranch);
+
+      res.json({ 
+        success: true, 
+        commitSha: newCommit.sha,
+        deployedCount,
+        message: `Successfully deployed ${deployedCount} change${deployedCount > 1 ? 's' : ''} in a single commit`,
+      });
+    } catch (error: any) {
+      console.error("Smart deploy error:", error);
       res.json({ success: false, error: error.message });
     }
   });
