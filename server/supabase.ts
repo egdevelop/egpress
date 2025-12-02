@@ -105,12 +105,21 @@ export interface RepositorySettings {
   vercel_project_name?: string;
   // Google Search Console site (which site is linked to this repo)
   search_console_site_url?: string;
+  // Indexing status for URLs (stored as JSON)
+  indexing_status?: string; // JSON string of IndexingStatusEntry[]
   // AdSense (per-repo configuration)
   adsense_publisher_id?: string;
   adsense_slots?: Record<string, string>;
   // Timestamps
   created_at?: string;
   updated_at?: string;
+}
+
+export interface IndexingStatusEntry {
+  url: string;
+  status: "pending" | "submitted" | "indexed" | "error";
+  lastSubmitted?: string;
+  message?: string;
 }
 
 // ==================== USER SETTINGS (User-Level Credentials) ====================
@@ -523,6 +532,114 @@ export async function updateRepositoryAdsense(
     return true;
   } catch (err) {
     console.error('Supabase update error:', err);
+    return false;
+  }
+}
+
+// ==================== INDEXING STATUS PERSISTENCE ====================
+
+export async function getIndexingStatusFromSupabase(
+  fullName: string
+): Promise<IndexingStatusEntry[] | null> {
+  if (!supabase) return null;
+  
+  try {
+    const { data, error } = await supabase
+      .from('repository_settings')
+      .select('indexing_status')
+      .eq('full_name', fullName)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return []; // Not found, return empty
+      }
+      console.error('Error loading indexing status:', error);
+      return null;
+    }
+    
+    if (data?.indexing_status) {
+      try {
+        return JSON.parse(data.indexing_status) as IndexingStatusEntry[];
+      } catch (e) {
+        console.warn('Failed to parse indexing status JSON');
+        return [];
+      }
+    }
+    
+    return [];
+  } catch (err) {
+    console.error('Supabase load error:', err);
+    return null;
+  }
+}
+
+export async function saveIndexingStatusToSupabase(
+  fullName: string,
+  githubUsername: string,
+  statuses: IndexingStatusEntry[]
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    const { error } = await supabase
+      .from('repository_settings')
+      .upsert({
+        full_name: fullName,
+        github_username: githubUsername,
+        indexing_status: JSON.stringify(statuses),
+        updated_at: new Date().toISOString(),
+      }, {
+        onConflict: 'full_name',
+      });
+    
+    if (error) {
+      // If the column doesn't exist, log but don't fail
+      if (error.message?.includes('indexing_status')) {
+        console.warn('indexing_status column not found in Supabase. Using memory storage.');
+        return false;
+      }
+      console.error('Error saving indexing status:', error);
+      return false;
+    }
+    
+    return true;
+  } catch (err) {
+    console.error('Supabase save error:', err);
+    return false;
+  }
+}
+
+export async function updateSingleIndexingStatus(
+  fullName: string,
+  githubUsername: string,
+  url: string,
+  statusUpdate: Partial<IndexingStatusEntry>
+): Promise<boolean> {
+  if (!supabase) return false;
+  
+  try {
+    // Get existing statuses
+    const existing = await getIndexingStatusFromSupabase(fullName);
+    if (existing === null) return false;
+    
+    // Update or add the status
+    const index = existing.findIndex(s => s.url === url);
+    if (index >= 0) {
+      existing[index] = { ...existing[index], ...statusUpdate };
+    } else {
+      existing.push({
+        url,
+        status: statusUpdate.status || "pending",
+        lastSubmitted: statusUpdate.lastSubmitted,
+        message: statusUpdate.message,
+      });
+    }
+    
+    // Save back
+    return await saveIndexingStatusToSupabase(fullName, githubUsername, existing);
+  } catch (err) {
+    console.error('Error updating single indexing status:', err);
     return false;
   }
 }

@@ -24,6 +24,11 @@ import {
   updateRepositorySiteUrl,
   clearRepositorySiteUrl,
   updateRepositoryAdsense,
+  // Indexing status persistence
+  getIndexingStatusFromSupabase,
+  saveIndexingStatusToSupabase,
+  updateSingleIndexingStatus,
+  type IndexingStatusEntry,
 } from "./supabase";
 import matter from "gray-matter";
 import yaml from "yaml";
@@ -5476,9 +5481,23 @@ export async function registerRoutes(
     }
   });
 
-  // Get indexing status
+  // Get indexing status (load from Supabase with memory fallback)
   app.get("/api/search-console/status", async (req, res) => {
     try {
+      const repo = await storage.getRepository();
+      
+      // Try to load from Supabase first
+      if (repo) {
+        const supabaseStatus = await getIndexingStatusFromSupabase(repo.fullName);
+        if (supabaseStatus !== null && supabaseStatus.length > 0) {
+          // Sync to memory for faster access
+          await storage.setIndexingStatus(supabaseStatus);
+          res.json({ success: true, data: supabaseStatus });
+          return;
+        }
+      }
+      
+      // Fallback to memory storage
       const status = await storage.getIndexingStatus();
       res.json({ success: true, data: status });
     } catch (error) {
@@ -5487,7 +5506,7 @@ export async function registerRoutes(
   });
 
   // Submit URLs for indexing using Google Indexing API
-  app.post("/api/search-console/submit", async (req, res) => {
+  app.post("/api/search-console/submit", requireAuth, async (req, res) => {
     try {
       const config = await storage.getSearchConsoleConfig();
       if (!config || !config.serviceAccountJson) {
@@ -5502,6 +5521,10 @@ export async function registerRoutes(
       if (!urls || !Array.isArray(urls) || urls.length === 0) {
         return res.json({ success: false, error: "URLs are required" });
       }
+
+      // Get repository info for persistence
+      const repo = await storage.getRepository();
+      const githubUsername = req.session.githubUsername;
 
       // Parse service account JSON
       let serviceAccount;
@@ -5533,7 +5556,6 @@ export async function registerRoutes(
       }
 
       // Setup Google Indexing API with service account
-      const { google } = await import("googleapis");
       const auth = new google.auth.JWT({
         email: serviceAccount.client_email,
         key: serviceAccount.private_key,
@@ -5556,11 +5578,19 @@ export async function registerRoutes(
             },
           });
 
-          await storage.updateIndexingStatus(url, {
-            status: "submitted",
+          const statusUpdate = {
+            status: "submitted" as const,
             lastSubmitted: new Date().toISOString(),
             message: `Submitted successfully. Notification time: ${response.data.urlNotificationMetadata?.latestUpdate?.notifyTime || 'N/A'}`,
-          });
+          };
+          
+          // Update memory storage
+          await storage.updateIndexingStatus(url, statusUpdate);
+          
+          // Persist to Supabase
+          if (repo && githubUsername) {
+            await updateSingleIndexingStatus(repo.fullName, githubUsername, url, statusUpdate);
+          }
           
           results.push({ url, status: "success", message: "Submitted to Google Indexing API" });
           submitted++;
@@ -5568,11 +5598,19 @@ export async function registerRoutes(
           const errorMessage = error.response?.data?.error?.message || error.message || "Failed to submit";
           errors.push(`${url}: ${errorMessage}`);
           
-          await storage.updateIndexingStatus(url, {
-            status: "error",
+          const statusUpdate = {
+            status: "error" as const,
             lastSubmitted: new Date().toISOString(),
             message: errorMessage,
-          });
+          };
+          
+          // Update memory storage
+          await storage.updateIndexingStatus(url, statusUpdate);
+          
+          // Persist to Supabase
+          if (repo && githubUsername) {
+            await updateSingleIndexingStatus(repo.fullName, githubUsername, url, statusUpdate);
+          }
           
           results.push({ url, status: "error", message: errorMessage });
         }
