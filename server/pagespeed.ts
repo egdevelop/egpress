@@ -126,10 +126,15 @@ function isAutoFixable(auditId: string): { fixable: boolean; fixType?: PageSpeed
   return { fixable: !!fixType, fixType };
 }
 
+export interface PageSpeedAuthOptions {
+  apiKey?: string;
+  accessToken?: string;
+}
+
 export async function analyzePageSpeed(
   url: string,
   strategy: "mobile" | "desktop" = "mobile",
-  apiKey?: string
+  auth?: PageSpeedAuthOptions
 ): Promise<PageSpeedResult> {
   const params = new URLSearchParams({
     url,
@@ -141,11 +146,22 @@ export async function analyzePageSpeed(
   params.append("category", "best-practices");
   params.append("category", "seo");
 
-  if (apiKey) {
-    params.set("key", apiKey);
+  // Use API key if provided
+  if (auth?.apiKey) {
+    params.set("key", auth.apiKey);
   }
 
-  const response = await fetch(`${PAGESPEED_API_URL}?${params.toString()}`);
+  // Build request headers
+  const headers: Record<string, string> = {};
+  
+  // Use access token from Service Account if provided (takes precedence)
+  if (auth?.accessToken) {
+    headers["Authorization"] = `Bearer ${auth.accessToken}`;
+  }
+
+  const response = await fetch(`${PAGESPEED_API_URL}?${params.toString()}`, {
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
+  });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));

@@ -71,9 +71,10 @@ The system comprises a React-based frontend and an Express.js backend.
   - Core Web Vitals metrics (LCP, FID, CLS, INP, FCP, TTFB)
   - Optimization opportunities and recommendations
   - Snapshot validation for one-click optimizations
-  - **API Key Configuration:** UI to set PageSpeed API key for higher rate limits (25,000 req/day vs 25 req/day without key)
+  - **Shared Service Account:** PageSpeed now uses the same Service Account as Search Console (preferred method)
+  - **Fallback API Key:** Optional separate API key configuration if Service Account not available
 - **SEO Page Simplified:** Now focused on Content SEO only (meta, content, images, structure, social analysis)
-- PageSpeed API uses separate API key authentication (not Service Account like Search Console)
+- PageSpeed API authentication priority: Service Account (from Search Console) > API Key > Public quota
 
 ## Changes (November 2024)
 

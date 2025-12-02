@@ -5007,11 +5007,19 @@ export async function registerRoutes(
   // Get PageSpeed API config
   app.get("/api/pagespeed/config", async (req, res) => {
     try {
+      // Check if Search Console service account is configured (preferred)
+      const searchConsoleConfig = await storage.getSearchConsoleConfig();
+      const hasServiceAccount = !!(searchConsoleConfig?.serviceAccountJson);
+      
+      // Also check for standalone API key
       const apiKey = await storage.getPageSpeedApiKey();
+      
       res.json({
         success: true,
         data: {
           hasApiKey: !!apiKey,
+          hasServiceAccount,
+          authMethod: hasServiceAccount ? "service_account" : (apiKey ? "api_key" : "none"),
         },
       });
     } catch (error) {
@@ -5019,7 +5027,7 @@ export async function registerRoutes(
     }
   });
 
-  // Save PageSpeed API key (optional - increases rate limits)
+  // Save PageSpeed API key (optional - only needed if not using Service Account)
   app.post("/api/pagespeed/config", requireAuth, async (req, res) => {
     try {
       const { apiKey } = req.body;
@@ -5046,9 +5054,44 @@ export async function registerRoutes(
         return res.json({ success: false, error: "Invalid URL format" });
       }
 
-      const apiKey = await storage.getPageSpeedApiKey();
+      // Try to use Search Console Service Account first (shared credentials)
+      let authOptions: { apiKey?: string; accessToken?: string } = {};
       
-      const result = await analyzePageSpeed(url, strategy, apiKey || undefined);
+      const searchConsoleConfig = await storage.getSearchConsoleConfig();
+      if (searchConsoleConfig?.serviceAccountJson) {
+        try {
+          const serviceAccount = JSON.parse(searchConsoleConfig.serviceAccountJson);
+          
+          // Create JWT auth and get access token
+          const auth = new google.auth.JWT({
+            email: serviceAccount.client_email,
+            key: serviceAccount.private_key,
+            scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+          });
+          
+          const { token } = await auth.getAccessToken();
+          if (token) {
+            authOptions.accessToken = token;
+            console.log("[PageSpeed] Using Service Account authentication");
+          }
+        } catch (saError: any) {
+          console.error("[PageSpeed] Service Account auth failed:", saError.message);
+          // Fall back to API key
+        }
+      }
+      
+      // Fall back to API key if no Service Account token
+      if (!authOptions.accessToken) {
+        const apiKey = await storage.getPageSpeedApiKey();
+        if (apiKey) {
+          authOptions.apiKey = apiKey;
+          console.log("[PageSpeed] Using API key authentication");
+        } else {
+          console.log("[PageSpeed] No authentication configured - using public quota");
+        }
+      }
+      
+      const result = await analyzePageSpeed(url, strategy, authOptions);
       const recommendations = generateOptimizationRecommendations(result);
 
       // Generate a unique snapshot ID and cache the result for validation

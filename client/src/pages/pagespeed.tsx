@@ -91,7 +91,14 @@ export default function PageSpeedPage() {
     queryKey: ["/api/repository"],
   });
 
-  const { data: configData, refetch: refetchConfig } = useQuery<{ success: boolean; data: { hasApiKey: boolean } }>({
+  const { data: configData, refetch: refetchConfig } = useQuery<{ 
+    success: boolean; 
+    data: { 
+      hasApiKey: boolean; 
+      hasServiceAccount: boolean;
+      authMethod: "service_account" | "api_key" | "none";
+    } 
+  }>({
     queryKey: ["/api/pagespeed/config"],
   });
 
@@ -202,6 +209,9 @@ export default function PageSpeedPage() {
   };
 
   const hasApiKey = configData?.data?.hasApiKey;
+  const hasServiceAccount = configData?.data?.hasServiceAccount;
+  const authMethod = configData?.data?.authMethod;
+  const isAuthenticated = authMethod === "service_account" || authMethod === "api_key";
 
   return (
     <div className="container max-w-6xl mx-auto py-6 px-4 space-y-6">
@@ -215,26 +225,46 @@ export default function PageSpeedPage() {
             Analyze your site's performance using Google PageSpeed Insights API
           </p>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => setShowApiKeySettings(!showApiKeySettings)}
-          data-testid="button-pagespeed-settings"
-        >
-          <Settings className="w-4 h-4 mr-2" />
-          API Settings
-          {hasApiKey && <Badge variant="secondary" className="ml-2">Configured</Badge>}
-        </Button>
+        <div className="flex items-center gap-2">
+          {isAuthenticated && (
+            <Badge variant="secondary" className="gap-1">
+              <CheckCircle2 className="w-3 h-3" />
+              {authMethod === "service_account" ? "Using Service Account" : "Using API Key"}
+            </Badge>
+          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShowApiKeySettings(!showApiKeySettings)}
+            data-testid="button-pagespeed-settings"
+          >
+            <Settings className="w-4 h-4 mr-2" />
+            Settings
+          </Button>
+        </div>
       </div>
 
-      {!hasApiKey && (
+      {hasServiceAccount && (
+        <div className="flex items-start gap-3 p-4 rounded-md bg-green-500/10 border border-green-500/20">
+          <CheckCircle2 className="w-5 h-5 text-green-500 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="font-medium text-green-700 dark:text-green-400">Using Search Console Service Account</p>
+            <p className="text-sm text-muted-foreground">
+              PageSpeed API is using the same Service Account as Search Console. 
+              No additional configuration needed.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {!isAuthenticated && (
         <div className="flex items-start gap-3 p-4 rounded-md bg-yellow-500/10 border border-yellow-500/20">
           <AlertTriangle className="w-5 h-5 text-yellow-500 mt-0.5 shrink-0" />
           <div className="space-y-1">
-            <p className="font-medium text-yellow-700 dark:text-yellow-400">API Key Not Configured</p>
+            <p className="font-medium text-yellow-700 dark:text-yellow-400">No Authentication Configured</p>
             <p className="text-sm text-muted-foreground">
-              PageSpeed API has very low quota without an API key (about 25 requests/day). 
-              Add your Google Cloud API key to increase the limit to 25,000 requests/day.
+              PageSpeed API has very low quota without authentication (about 25 requests/day). 
+              Configure Search Console Service Account first, or add an API key.
             </p>
             <Button
               variant="link"
@@ -254,20 +284,38 @@ export default function PageSpeedPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Key className="w-5 h-5" />
-                PageSpeed API Key
+                PageSpeed Authentication
               </CardTitle>
               <CardDescription>
-                Configure your Google Cloud API key for higher rate limits
+                Configure authentication for PageSpeed Insights API
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {hasServiceAccount && (
+                <div className="p-3 rounded-md bg-green-500/10 border border-green-500/20 space-y-2">
+                  <div className="flex items-center gap-2 text-green-700 dark:text-green-400 font-medium">
+                    <CheckCircle2 className="w-4 h-4" />
+                    Service Account Active
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    PageSpeed is using the Service Account from Search Console. 
+                    This is the recommended configuration.
+                  </p>
+                </div>
+              )}
+
               <div className="space-y-2">
+                <p className="text-sm font-medium">
+                  {hasServiceAccount ? "Alternative: Use API Key" : "Option: Use API Key"}
+                </p>
                 <p className="text-sm text-muted-foreground">
-                  To get an API key:
+                  {hasServiceAccount 
+                    ? "You can optionally configure a separate API key as fallback."
+                    : "If you don't have Search Console configured, you can use an API key instead."}
                 </p>
                 <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
                   <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">Google Cloud Console <ExternalLink className="w-3 h-3" /></a></li>
-                  <li>Create or select a project (same as Search Console)</li>
+                  <li>Select the same project as Search Console</li>
                   <li>Enable the "PageSpeed Insights API"</li>
                   <li>Create an API key and paste it below</li>
                 </ol>
@@ -276,7 +324,7 @@ export default function PageSpeedPage() {
               <div className="flex gap-2">
                 <Input
                   type="password"
-                  placeholder="Enter your PageSpeed API key"
+                  placeholder="Enter your PageSpeed API key (optional if using Service Account)"
                   value={apiKeyInput}
                   onChange={(e) => setApiKeyInput(e.target.value)}
                   data-testid="input-pagespeed-apikey"
@@ -298,9 +346,9 @@ export default function PageSpeedPage() {
               </div>
 
               {hasApiKey && (
-                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
-                  <CheckCircle2 className="w-4 h-4" />
-                  API key is configured
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                  API key is configured {hasServiceAccount && "(fallback)"}
                 </div>
               )}
             </CardContent>
