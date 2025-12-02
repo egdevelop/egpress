@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { 
   Search, 
   AlertTriangle, 
@@ -21,7 +22,12 @@ import {
   Smartphone,
   Monitor,
   ChevronRight,
-  Sparkles
+  ChevronDown,
+  Sparkles,
+  Key,
+  Settings,
+  ExternalLink,
+  Save
 } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -78,9 +84,39 @@ export default function PageSpeedPage() {
   const [pageSpeedStrategy, setPageSpeedStrategy] = useState<"mobile" | "desktop">("mobile");
   const [pageSpeedResult, setPageSpeedResult] = useState<PageSpeedResult | null>(null);
   const [selectedOptimizations, setSelectedOptimizations] = useState<Set<string>>(new Set());
+  const [apiKeyInput, setApiKeyInput] = useState("");
+  const [showApiKeySettings, setShowApiKeySettings] = useState(false);
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
+  });
+
+  const { data: configData, refetch: refetchConfig } = useQuery<{ success: boolean; data: { hasApiKey: boolean } }>({
+    queryKey: ["/api/pagespeed/config"],
+  });
+
+  const saveApiKeyMutation = useMutation({
+    mutationFn: async (apiKey: string) => {
+      const response = await apiRequest("POST", "/api/pagespeed/config", { apiKey });
+      return response.json();
+    },
+    onSuccess: (data) => {
+      if (data.success) {
+        toast({
+          title: "API Key Saved",
+          description: "PageSpeed API key has been configured",
+        });
+        setApiKeyInput("");
+        setShowApiKeySettings(false);
+        refetchConfig();
+      } else {
+        toast({
+          title: "Failed to Save",
+          description: data.error,
+          variant: "destructive",
+        });
+      }
+    },
   });
 
   const pageSpeedMutation = useMutation({
@@ -165,6 +201,8 @@ export default function PageSpeedPage() {
     });
   };
 
+  const hasApiKey = configData?.data?.hasApiKey;
+
   return (
     <div className="container max-w-6xl mx-auto py-6 px-4 space-y-6">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -177,7 +215,98 @@ export default function PageSpeedPage() {
             Analyze your site's performance using Google PageSpeed Insights API
           </p>
         </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setShowApiKeySettings(!showApiKeySettings)}
+          data-testid="button-pagespeed-settings"
+        >
+          <Settings className="w-4 h-4 mr-2" />
+          API Settings
+          {hasApiKey && <Badge variant="secondary" className="ml-2">Configured</Badge>}
+        </Button>
       </div>
+
+      {!hasApiKey && (
+        <div className="flex items-start gap-3 p-4 rounded-md bg-yellow-500/10 border border-yellow-500/20">
+          <AlertTriangle className="w-5 h-5 text-yellow-500 mt-0.5 shrink-0" />
+          <div className="space-y-1">
+            <p className="font-medium text-yellow-700 dark:text-yellow-400">API Key Not Configured</p>
+            <p className="text-sm text-muted-foreground">
+              PageSpeed API has very low quota without an API key (about 25 requests/day). 
+              Add your Google Cloud API key to increase the limit to 25,000 requests/day.
+            </p>
+            <Button
+              variant="link"
+              className="h-auto p-0 text-sm"
+              onClick={() => setShowApiKeySettings(true)}
+            >
+              Configure API Key
+              <ChevronRight className="w-3 h-3 ml-1" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <Collapsible open={showApiKeySettings} onOpenChange={setShowApiKeySettings}>
+        <CollapsibleContent>
+          <Card className="mb-4">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Key className="w-5 h-5" />
+                PageSpeed API Key
+              </CardTitle>
+              <CardDescription>
+                Configure your Google Cloud API key for higher rate limits
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <p className="text-sm text-muted-foreground">
+                  To get an API key:
+                </p>
+                <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
+                  <li>Go to <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener noreferrer" className="text-primary hover:underline inline-flex items-center gap-1">Google Cloud Console <ExternalLink className="w-3 h-3" /></a></li>
+                  <li>Create or select a project (same as Search Console)</li>
+                  <li>Enable the "PageSpeed Insights API"</li>
+                  <li>Create an API key and paste it below</li>
+                </ol>
+              </div>
+              
+              <div className="flex gap-2">
+                <Input
+                  type="password"
+                  placeholder="Enter your PageSpeed API key"
+                  value={apiKeyInput}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                  data-testid="input-pagespeed-apikey"
+                />
+                <Button
+                  onClick={() => saveApiKeyMutation.mutate(apiKeyInput)}
+                  disabled={saveApiKeyMutation.isPending || !apiKeyInput}
+                  data-testid="button-save-pagespeed-apikey"
+                >
+                  {saveApiKeyMutation.isPending ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Save className="w-4 h-4 mr-2" />
+                      Save
+                    </>
+                  )}
+                </Button>
+              </div>
+
+              {hasApiKey && (
+                <div className="flex items-center gap-2 text-sm text-green-600 dark:text-green-400">
+                  <CheckCircle2 className="w-4 h-4" />
+                  API key is configured
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </CollapsibleContent>
+      </Collapsible>
 
       <Card>
         <CardHeader>

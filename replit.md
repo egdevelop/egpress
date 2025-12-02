@@ -60,7 +60,22 @@ The system comprises a React-based frontend and an Express.js backend.
 - **Validation:** Zod for schema validation.
 - **AST-based Config Updates:** Uses ts-morph for safe, targeted updates to siteSettings.ts without corrupting unrelated values.
 
-## Recent Changes (November 2024)
+## Recent Changes (December 2024)
+
+- **Site Kit Navigation:** Reorganized sidebar with "Site Kit" collapsible menu grouping Google services:
+  - PageSpeed Insights (new dedicated page)
+  - Search Console
+- **PageSpeed Insights Page (Dedicated):** Separated from SEO page for better UX:
+  - URL input with mobile/desktop strategy toggle
+  - Score cards for Performance, Accessibility, Best Practices, SEO
+  - Core Web Vitals metrics (LCP, FID, CLS, INP, FCP, TTFB)
+  - Optimization opportunities and recommendations
+  - Snapshot validation for one-click optimizations
+  - **API Key Configuration:** UI to set PageSpeed API key for higher rate limits (25,000 req/day vs 25 req/day without key)
+- **SEO Page Simplified:** Now focused on Content SEO only (meta, content, images, structure, social analysis)
+- PageSpeed API uses separate API key authentication (not Service Account like Search Console)
+
+## Changes (November 2024)
 
 - Updated Site Settings to match new siteSettings.ts structure from template-egpress-v1
 - Updated Logo settings with new structure: type (text/image), image upload, favicon upload, showText, width, height
