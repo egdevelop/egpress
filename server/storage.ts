@@ -85,6 +85,17 @@ export interface IStorage {
   clearDraftQueue(): Promise<void>;
   getSmartDeploySettings(): Promise<SmartDeploySettings>;
   setSmartDeploySettings(settings: SmartDeploySettings): Promise<void>;
+
+  // PageSpeed Insights
+  getPageSpeedApiKey(): Promise<string | null>;
+  setPageSpeedApiKey(key: string): Promise<void>;
+  getPageSpeedResults(): Promise<any[]>;
+  setPageSpeedResults(results: any[]): Promise<void>;
+  
+  // PageSpeed Snapshot (for validation)
+  getPageSpeedSnapshot(): Promise<{ id: string; result: any; recommendations: any[] } | null>;
+  setPageSpeedSnapshot(snapshot: { id: string; result: any; recommendations: any[] }): Promise<void>;
+  clearPageSpeedSnapshot(): Promise<void>;
 }
 
 export class MemStorage implements IStorage {
@@ -106,6 +117,9 @@ export class MemStorage implements IStorage {
   private geminiApiKey: string | null = null;
   private draftQueue: DraftQueue | null = null;
   private smartDeploySettings: SmartDeploySettings = { enabled: true, autoQueueChanges: true };
+  private pageSpeedApiKey: string | null = null;
+  private pageSpeedResults: any[] = [];
+  private pageSpeedSnapshot: { id: string; result: any; recommendations: any[] } | null = null;
 
   async getRepository(): Promise<Repository | null> {
     return this.repository;
@@ -345,6 +359,34 @@ export class MemStorage implements IStorage {
 
   async setSmartDeploySettings(settings: SmartDeploySettings): Promise<void> {
     this.smartDeploySettings = settings;
+  }
+
+  async getPageSpeedApiKey(): Promise<string | null> {
+    return this.pageSpeedApiKey;
+  }
+
+  async setPageSpeedApiKey(key: string): Promise<void> {
+    this.pageSpeedApiKey = key || null;
+  }
+
+  async getPageSpeedResults(): Promise<any[]> {
+    return this.pageSpeedResults;
+  }
+
+  async setPageSpeedResults(results: any[]): Promise<void> {
+    this.pageSpeedResults = results;
+  }
+
+  async getPageSpeedSnapshot(): Promise<{ id: string; result: any; recommendations: any[] } | null> {
+    return this.pageSpeedSnapshot;
+  }
+
+  async setPageSpeedSnapshot(snapshot: { id: string; result: any; recommendations: any[] }): Promise<void> {
+    this.pageSpeedSnapshot = snapshot;
+  }
+
+  async clearPageSpeedSnapshot(): Promise<void> {
+    this.pageSpeedSnapshot = null;
   }
 }
 

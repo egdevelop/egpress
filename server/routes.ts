@@ -6,6 +6,7 @@ import { storage, type SearchConsoleConfig, type IndexingStatus } from "./storag
 import { getGitHubClient, getAuthenticatedUser, isGitHubConnected, getGitHubConnectionInfo, setManualGitHubToken, clearManualToken } from "./github";
 import { VercelService } from "./vercel";
 import { generateBlogPost, generateImage, generateSEOContent } from "./gemini";
+import { analyzePageSpeed, generateOptimizationRecommendations, generateAstroOptimizations, type PageSpeedResult, type OptimizationRecommendation } from "./pagespeed";
 import { 
   // User-level settings (credentials shared across all repos)
   getUserSettings,
@@ -4998,6 +4999,346 @@ export async function registerRoutes(
     } catch (error: any) {
       console.error("SEO optimize error:", error);
       res.json({ success: false, error: error.message || "Failed to optimize SEO" });
+    }
+  });
+
+  // ==================== PAGESPEED INSIGHTS ====================
+
+  // Get PageSpeed API config
+  app.get("/api/pagespeed/config", async (req, res) => {
+    try {
+      const apiKey = await storage.getPageSpeedApiKey();
+      res.json({
+        success: true,
+        data: {
+          hasApiKey: !!apiKey,
+        },
+      });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get PageSpeed config" });
+    }
+  });
+
+  // Save PageSpeed API key (optional - increases rate limits)
+  app.post("/api/pagespeed/config", requireAuth, async (req, res) => {
+    try {
+      const { apiKey } = req.body;
+      await storage.setPageSpeedApiKey(apiKey || "");
+      res.json({ success: true });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to save PageSpeed config" });
+    }
+  });
+
+  // Analyze URL with PageSpeed Insights
+  app.post("/api/pagespeed/analyze", requireAuth, async (req, res) => {
+    try {
+      const { url, strategy = "mobile" } = req.body;
+
+      if (!url) {
+        return res.json({ success: false, error: "URL is required" });
+      }
+
+      // Validate URL format
+      try {
+        new URL(url);
+      } catch {
+        return res.json({ success: false, error: "Invalid URL format" });
+      }
+
+      const apiKey = await storage.getPageSpeedApiKey();
+      
+      const result = await analyzePageSpeed(url, strategy, apiKey || undefined);
+      const recommendations = generateOptimizationRecommendations(result);
+
+      // Generate a unique snapshot ID and cache the result for validation
+      const snapshotId = `ps-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      await storage.setPageSpeedSnapshot({
+        id: snapshotId,
+        result,
+        recommendations,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          ...result,
+          recommendations,
+          snapshotId,
+        },
+      });
+    } catch (error: any) {
+      console.error("PageSpeed analyze error:", error);
+      res.json({ success: false, error: error.message || "Failed to analyze PageSpeed" });
+    }
+  });
+
+  // Get cached PageSpeed results
+  app.get("/api/pagespeed/results", async (req, res) => {
+    try {
+      const results = await storage.getPageSpeedResults();
+      res.json({ success: true, data: results || [] });
+    } catch (error) {
+      res.json({ success: false, error: "Failed to get PageSpeed results" });
+    }
+  });
+
+  // Apply PageSpeed optimizations to repository
+  app.post("/api/pagespeed/optimize", requireAuth, async (req, res) => {
+    try {
+      const { recommendations, snapshotId, queueOnly = true } = req.body;
+
+      if (!recommendations || !Array.isArray(recommendations) || recommendations.length === 0) {
+        return res.json({ success: false, error: "No recommendations specified" });
+      }
+
+      // Validate snapshot ID exists
+      const snapshot = await storage.getPageSpeedSnapshot();
+      if (!snapshot) {
+        return res.json({ success: false, error: "No PageSpeed analysis found. Please run analysis first." });
+      }
+
+      if (snapshotId && snapshot.id !== snapshotId) {
+        return res.json({ success: false, error: "Stale analysis. Please run a new PageSpeed analysis." });
+      }
+
+      // Validate recommendation IDs against the snapshot
+      const validRecommendationIds = new Set(snapshot.recommendations.map((r: any) => r.id));
+      const invalidIds = recommendations.filter((r: any) => !validRecommendationIds.has(r.id));
+      
+      if (invalidIds.length > 0) {
+        return res.json({ 
+          success: false, 
+          error: `Invalid recommendation IDs: ${invalidIds.map((r: any) => r.id).join(", ")}. Please run a new analysis.` 
+        });
+      }
+
+      // Use only validated recommendations from snapshot
+      const validatedRecommendations = snapshot.recommendations.filter((r: any) => 
+        recommendations.some((req: any) => req.id === r.id)
+      );
+
+      const repo = await storage.getRepository();
+      if (!repo) {
+        return res.json({ success: false, error: "No repository connected" });
+      }
+
+      const octokit = getGitHubClient();
+      if (!octokit) {
+        return res.json({ success: false, error: "GitHub not connected" });
+      }
+
+      const { astroConfig, vercelConfig, layoutChanges } = generateAstroOptimizations(validatedRecommendations);
+      const operations: Array<{ type: "write"; path: string; content: string }> = [];
+      const appliedOptimizations: string[] = [];
+
+      // Check for existing astro.config.mjs
+      try {
+        const { data: configData } = await octokit.repos.getContent({
+          owner: repo.owner,
+          repo: repo.name,
+          path: "astro.config.mjs",
+          ref: repo.activeBranch,
+        });
+
+        if (!Array.isArray(configData) && configData.content) {
+          const existingContent = Buffer.from(configData.content, "base64").toString("utf-8");
+          
+          // For now, we'll add a comment with recommendations
+          // Full AST modification would be more complex
+          const configComment = `
+// PageSpeed Optimization Recommendations (auto-generated)
+// Add these settings to improve performance:
+// ${JSON.stringify(astroConfig, null, 2).split('\n').join('\n// ')}
+`;
+          
+          if (!existingContent.includes("PageSpeed Optimization")) {
+            const newContent = configComment + "\n" + existingContent;
+            operations.push({
+              type: "write",
+              path: "astro.config.mjs",
+              content: newContent,
+            });
+            appliedOptimizations.push("Added performance recommendations to astro.config.mjs");
+          }
+        }
+      } catch {
+        // Config doesn't exist, skip
+      }
+
+      // Create or update vercel.json with cache headers
+      try {
+        let existingVercelConfig: any = {};
+        let existingSha: string | undefined;
+
+        try {
+          const { data: vercelData } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: "vercel.json",
+            ref: repo.activeBranch,
+          });
+
+          if (!Array.isArray(vercelData) && vercelData.content) {
+            existingVercelConfig = JSON.parse(
+              Buffer.from(vercelData.content, "base64").toString("utf-8")
+            );
+            existingSha = (vercelData as any).sha;
+          }
+        } catch {
+          // vercel.json doesn't exist
+        }
+
+        // Merge headers
+        const mergedHeaders = [
+          ...(existingVercelConfig.headers || []),
+          ...vercelConfig.headers.filter((h: any) => 
+            !existingVercelConfig.headers?.some((eh: any) => eh.source === h.source)
+          ),
+        ];
+
+        const newVercelConfig = {
+          ...existingVercelConfig,
+          headers: mergedHeaders,
+        };
+
+        operations.push({
+          type: "write",
+          path: "vercel.json",
+          content: JSON.stringify(newVercelConfig, null, 2),
+        });
+        appliedOptimizations.push("Updated vercel.json with optimized cache headers");
+      } catch (error) {
+        console.error("Error updating vercel.json:", error);
+      }
+
+      // Add preload hints to layout if applicable
+      if (layoutChanges.length > 0) {
+        try {
+          const layoutPaths = [
+            "src/layouts/BaseLayout.astro",
+            "src/layouts/Layout.astro",
+            "src/layouts/Base.astro",
+          ];
+
+          for (const layoutPath of layoutPaths) {
+            try {
+              const { data: layoutData } = await octokit.repos.getContent({
+                owner: repo.owner,
+                repo: repo.name,
+                path: layoutPath,
+                ref: repo.activeBranch,
+              });
+
+              if (!Array.isArray(layoutData) && layoutData.content) {
+                let layoutContent = Buffer.from(layoutData.content, "base64").toString("utf-8");
+                
+                // Add preload hints before </head>
+                const preloadHints = layoutChanges.join("\n    ");
+                if (!layoutContent.includes("preload") && layoutContent.includes("</head>")) {
+                  layoutContent = layoutContent.replace(
+                    "</head>",
+                    `    <!-- PageSpeed Optimizations -->\n    ${preloadHints}\n  </head>`
+                  );
+                  
+                  operations.push({
+                    type: "write",
+                    path: layoutPath,
+                    content: layoutContent,
+                  });
+                  appliedOptimizations.push(`Added preload hints to ${layoutPath}`);
+                  break; // Only update one layout file
+                }
+              }
+            } catch {
+              // Layout file doesn't exist, try next
+              continue;
+            }
+          }
+        } catch (error) {
+          console.error("Error updating layout:", error);
+        }
+      }
+
+      // Check if there are any operations to perform
+      if (operations.length === 0) {
+        return res.json({
+          success: true,
+          data: {
+            message: "No optimizations needed or already applied",
+            appliedOptimizations: [],
+          },
+        });
+      }
+
+      // Check Smart Deploy status
+      const smartDeployActive = await isSmartDeployActive();
+      const shouldQueue = queueOnly === true || smartDeployActive;
+
+      if (shouldQueue) {
+        // Add to Smart Deploy queue
+        const draftChange: any = {
+          id: crypto.randomUUID(),
+          type: "config_update",
+          title: `PageSpeed optimizations (${appliedOptimizations.length} changes)`,
+          path: operations[0].path,
+          operations: operations.map(op => ({
+            type: "write" as const,
+            path: op.path,
+            content: op.content,
+            encoding: "utf-8" as const,
+          })),
+          metadata: {
+            optimizationType: "pagespeed",
+            changes: appliedOptimizations,
+          },
+          createdAt: new Date().toISOString(),
+        };
+
+        await storage.addDraftChange(draftChange);
+      } else {
+        // Direct commit
+        for (const op of operations) {
+          let sha: string | undefined;
+          
+          try {
+            const { data: existingFile } = await octokit.repos.getContent({
+              owner: repo.owner,
+              repo: repo.name,
+              path: op.path,
+              ref: repo.activeBranch,
+            });
+            
+            if (!Array.isArray(existingFile)) {
+              sha = (existingFile as any).sha;
+            }
+          } catch {
+            // File doesn't exist
+          }
+
+          await octokit.repos.createOrUpdateFileContents({
+            owner: repo.owner,
+            repo: repo.name,
+            path: op.path,
+            message: `PageSpeed optimization: ${op.path}`,
+            content: Buffer.from(op.content).toString("base64"),
+            sha,
+            branch: repo.activeBranch,
+          });
+        }
+      }
+
+      res.json({
+        success: true,
+        data: {
+          appliedOptimizations,
+          queued: shouldQueue,
+          operationsCount: operations.length,
+        },
+      });
+    } catch (error: any) {
+      console.error("PageSpeed optimize error:", error);
+      res.json({ success: false, error: error.message || "Failed to apply optimizations" });
     }
   });
 
