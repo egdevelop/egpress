@@ -28,6 +28,7 @@ import {
 import matter from "gray-matter";
 import yaml from "yaml";
 import { Octokit } from "@octokit/rest";
+import { google } from "googleapis";
 import type { Repository, Post, ThemeSettings, FileTreeItem, PageContent, SiteConfig, AdsenseConfig, StaticPage, BranchInfo, DraftChange } from "@shared/schema";
 import { siteConfigSchema, adsenseConfigSchema } from "@shared/schema";
 import { Project, SyntaxKind, ObjectLiteralExpression, PropertyAssignment } from 'ts-morph';
