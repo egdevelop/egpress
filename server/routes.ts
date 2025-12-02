@@ -5067,7 +5067,7 @@ export async function registerRoutes(
           const auth = new google.auth.JWT({
             email: serviceAccount.client_email,
             key: serviceAccount.private_key,
-            scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+            scopes: ["openid"],
           });
           
           const { token } = await auth.getAccessToken();
