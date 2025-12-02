@@ -26,6 +26,7 @@ import VercelPage from "@/pages/vercel";
 import ContentDefaultsPage from "@/pages/content-defaults";
 import PerformancePage from "@/pages/performance";
 import SEOPage from "@/pages/seo";
+import PageSpeedPage from "@/pages/pagespeed";
 import Login from "@/pages/login";
 import { Loader2 } from "lucide-react";
 
@@ -47,6 +48,7 @@ function Router() {
       <Route path="/clone" component={CloneSite} />
       <Route path="/performance" component={PerformancePage} />
       <Route path="/seo" component={SEOPage} />
+      <Route path="/pagespeed" component={PageSpeedPage} />
       <Route path="/settings" component={Settings} />
       <Route component={NotFound} />
     </Switch>

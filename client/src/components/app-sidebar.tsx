@@ -22,7 +22,10 @@ import {
   ArrowRightLeft,
   FileSliders,
   Zap,
-  TrendingUp
+  TrendingUp,
+  ChevronDown,
+  Gauge,
+  BarChart3
 } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import {
@@ -63,6 +66,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -127,13 +135,6 @@ const integrationsItems = [
     configKey: "vercel",
   },
   {
-    title: "Search Console",
-    url: "/search-console",
-    icon: Search,
-    description: "SEO & indexing",
-    configKey: "gsc",
-  },
-  {
     title: "AdSense",
     url: "/adsense",
     icon: DollarSign,
@@ -149,18 +150,27 @@ const integrationsItems = [
   },
 ];
 
+const siteKitItems = [
+  {
+    title: "PageSpeed",
+    url: "/pagespeed",
+    icon: Gauge,
+    description: "Performance insights",
+  },
+  {
+    title: "Search Console",
+    url: "/search-console",
+    icon: Search,
+    description: "SEO & indexing",
+  },
+];
+
 const systemItems = [
   {
     title: "Performance",
     url: "/performance",
     icon: Zap,
     description: "Image optimization & deploy",
-  },
-  {
-    title: "SEO Analyzer",
-    url: "/seo",
-    icon: TrendingUp,
-    description: "Optimize search rankings",
   },
   {
     title: "Clone Site",
@@ -184,9 +194,12 @@ export function AppSidebar() {
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
   const [repoSearch, setRepoSearch] = useState("");
   const [connectingRepoId, setConnectingRepoId] = useState<number | null>(null);
+  const [siteKitOpen, setSiteKitOpen] = useState(true);
   const { toast } = useToast();
   const { githubUsername, logout } = useAuth();
   const [, setLocationNav] = useLocation();
+  
+  const isSiteKitActive = siteKitItems.some(item => location === item.url);
 
   const { data: repoData } = useQuery<{ success: boolean; data: Repository | null }>({
     queryKey: ["/api/repository"],
@@ -646,6 +659,42 @@ export function AppSidebar() {
                   </SidebarMenuItem>
                 );
               })}
+              
+              <Collapsible open={siteKitOpen} onOpenChange={setSiteKitOpen}>
+                <SidebarMenuItem>
+                  <CollapsibleTrigger asChild>
+                    <SidebarMenuButton
+                      className={isSiteKitActive ? "bg-sidebar-accent" : ""}
+                      data-testid="nav-site-kit"
+                    >
+                      <BarChart3 className="w-4 h-4" />
+                      <span>Site Kit</span>
+                      <ChevronDown className={`ml-auto w-4 h-4 transition-transform ${siteKitOpen ? "rotate-180" : ""}`} />
+                    </SidebarMenuButton>
+                  </CollapsibleTrigger>
+                </SidebarMenuItem>
+                <CollapsibleContent>
+                  <div className="pl-4 space-y-0.5">
+                    {siteKitItems.map((item) => {
+                      const isActive = location === item.url;
+                      return (
+                        <SidebarMenuItem key={item.title}>
+                          <SidebarMenuButton 
+                            asChild 
+                            isActive={isActive}
+                            data-testid={`nav-${item.title.toLowerCase().replace(/\s+/g, '-')}`}
+                          >
+                            <Link href={item.url}>
+                              <item.icon className="w-4 h-4" />
+                              <span>{item.title}</span>
+                            </Link>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      );
+                    })}
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
