@@ -11,6 +11,13 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Form,
   FormControl,
   FormDescription,
@@ -19,10 +26,17 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { DollarSign, Monitor, Code, LayoutTemplate, Save, RefreshCw, FileCode, Columns } from "lucide-react";
+import { DollarSign, Monitor, Code, LayoutTemplate, Save, RefreshCw, FileCode } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Repository, AdsenseConfig } from "@shared/schema";
+
+const adSlotSchema = z.object({
+  slot: z.string(),
+  format: z.string(),
+  layout: z.string().optional(),
+  responsive: z.boolean(),
+});
 
 const adsenseFormSchema = z.object({
   enabled: z.boolean(),
@@ -30,22 +44,133 @@ const adsenseFormSchema = z.object({
   autoAdsEnabled: z.boolean(),
   headerScript: z.string().optional(),
   adCodes: z.object({
-    header: z.string().optional(),
-    sidebar: z.string().optional(),
-    inArticle: z.string().optional(),
-    footer: z.string().optional(),
-    beforeContent: z.string().optional(),
-    afterContent: z.string().optional(),
-  }),
-  slots: z.object({
-    header: z.string().optional(),
-    sidebar: z.string().optional(),
-    inArticle: z.string().optional(),
-    footer: z.string().optional(),
+    header: adSlotSchema,
+    sidebar: adSlotSchema,
+    inArticle: adSlotSchema,
+    footer: adSlotSchema,
+    beforeContent: adSlotSchema,
+    afterContent: adSlotSchema,
   }),
 });
 
 type AdsenseFormValues = z.infer<typeof adsenseFormSchema>;
+
+const defaultSlot = { slot: "", format: "auto", layout: "", responsive: true };
+
+function AdSlotFields({ 
+  name, 
+  label, 
+  description, 
+  form,
+  showLayout = false 
+}: { 
+  name: string; 
+  label: string; 
+  description: string;
+  form: ReturnType<typeof useForm<AdsenseFormValues>>;
+  showLayout?: boolean;
+}) {
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="text-base">{label}</CardTitle>
+        <CardDescription className="text-sm">{description}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <FormField
+          control={form.control}
+          name={`adCodes.${name}.slot` as any}
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Slot ID</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="1234567890"
+                  {...field}
+                  value={field.value || ""}
+                  data-testid={`input-slot-${name}`}
+                />
+              </FormControl>
+              <FormDescription>
+                Ad unit slot ID from AdSense (data-ad-slot)
+              </FormDescription>
+            </FormItem>
+          )}
+        />
+
+        <div className="grid grid-cols-2 gap-4">
+          <FormField
+            control={form.control}
+            name={`adCodes.${name}.format` as any}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Format</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value || "auto"}>
+                  <FormControl>
+                    <SelectTrigger data-testid={`select-format-${name}`}>
+                      <SelectValue placeholder="Select format" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="auto">Auto</SelectItem>
+                    <SelectItem value="horizontal">Horizontal</SelectItem>
+                    <SelectItem value="vertical">Vertical</SelectItem>
+                    <SelectItem value="rectangle">Rectangle</SelectItem>
+                    <SelectItem value="fluid">Fluid</SelectItem>
+                  </SelectContent>
+                </Select>
+              </FormItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name={`adCodes.${name}.responsive` as any}
+            render={({ field }) => (
+              <FormItem className="flex items-center justify-between rounded-lg border p-3">
+                <FormLabel className="text-sm">Responsive</FormLabel>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                    data-testid={`switch-responsive-${name}`}
+                  />
+                </FormControl>
+              </FormItem>
+            )}
+          />
+        </div>
+
+        {showLayout && (
+          <FormField
+            control={form.control}
+            name={`adCodes.${name}.layout` as any}
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Layout</FormLabel>
+                <Select onValueChange={field.onChange} value={field.value || ""}>
+                  <FormControl>
+                    <SelectTrigger data-testid={`select-layout-${name}`}>
+                      <SelectValue placeholder="Select layout (optional)" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="in-article">In-Article</SelectItem>
+                    <SelectItem value="in-feed">In-Feed</SelectItem>
+                  </SelectContent>
+                </Select>
+                <FormDescription>
+                  Special layout for in-content ads
+                </FormDescription>
+              </FormItem>
+            )}
+          />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export default function Adsense() {
   const { toast } = useToast();
@@ -59,6 +184,18 @@ export default function Adsense() {
     enabled: !!repoData?.data,
   });
 
+  const getSlotValue = (data: AdsenseConfig | undefined, slotName: string) => {
+    if (!data?.adCodes) return defaultSlot;
+    const slotData = (data.adCodes as any)[slotName];
+    if (!slotData) return defaultSlot;
+    return {
+      slot: slotData.slot ?? "",
+      format: slotData.format ?? "auto",
+      layout: slotData.layout ?? "",
+      responsive: slotData.responsive ?? true,
+    };
+  };
+
   const form = useForm<AdsenseFormValues>({
     resolver: zodResolver(adsenseFormSchema),
     defaultValues: {
@@ -67,18 +204,12 @@ export default function Adsense() {
       autoAdsEnabled: false,
       headerScript: "",
       adCodes: {
-        header: "",
-        sidebar: "",
-        inArticle: "",
-        footer: "",
-        beforeContent: "",
-        afterContent: "",
-      },
-      slots: {
-        header: "",
-        sidebar: "",
-        inArticle: "",
-        footer: "",
+        header: defaultSlot,
+        sidebar: defaultSlot,
+        inArticle: { ...defaultSlot, format: "fluid", layout: "in-article" },
+        footer: { ...defaultSlot, format: "horizontal" },
+        beforeContent: defaultSlot,
+        afterContent: defaultSlot,
       },
     },
     values: adsenseData?.data ? {
@@ -87,18 +218,12 @@ export default function Adsense() {
       autoAdsEnabled: adsenseData.data.autoAdsEnabled ?? false,
       headerScript: adsenseData.data.headerScript ?? "",
       adCodes: {
-        header: adsenseData.data.adCodes?.header ?? "",
-        sidebar: adsenseData.data.adCodes?.sidebar ?? "",
-        inArticle: adsenseData.data.adCodes?.inArticle ?? "",
-        footer: adsenseData.data.adCodes?.footer ?? "",
-        beforeContent: adsenseData.data.adCodes?.beforeContent ?? "",
-        afterContent: adsenseData.data.adCodes?.afterContent ?? "",
-      },
-      slots: {
-        header: adsenseData.data.slots?.header ?? "",
-        sidebar: adsenseData.data.slots?.sidebar ?? "",
-        inArticle: adsenseData.data.slots?.inArticle ?? "",
-        footer: adsenseData.data.slots?.footer ?? "",
+        header: getSlotValue(adsenseData.data, "header"),
+        sidebar: getSlotValue(adsenseData.data, "sidebar"),
+        inArticle: getSlotValue(adsenseData.data, "inArticle"),
+        footer: getSlotValue(adsenseData.data, "footer"),
+        beforeContent: getSlotValue(adsenseData.data, "beforeContent"),
+        afterContent: getSlotValue(adsenseData.data, "afterContent"),
       },
     } : undefined,
   });
@@ -187,7 +312,7 @@ export default function Adsense() {
                 Scripts
               </TabsTrigger>
               <TabsTrigger value="placements" data-testid="tab-placements">
-                <Columns className="w-4 h-4 mr-2" />
+                <LayoutTemplate className="w-4 h-4 mr-2" />
                 Placements
               </TabsTrigger>
             </TabsList>
@@ -280,7 +405,7 @@ export default function Adsense() {
                     Header Script
                   </CardTitle>
                   <CardDescription>
-                    Paste the AdSense script code to be inserted in the {"<head>"} section of your site
+                    Paste the AdSense script code to be inserted in the {"<head>"} section
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
@@ -300,7 +425,7 @@ export default function Adsense() {
                           />
                         </FormControl>
                         <FormDescription>
-                          This script will be inserted into the {"<head>"} tag of every page. Get this code from your AdSense dashboard.
+                          This script will be inserted into the {"<head>"} tag of every page
                         </FormDescription>
                         <FormMessage />
                       </FormItem>
@@ -311,158 +436,50 @@ export default function Adsense() {
             </TabsContent>
 
             <TabsContent value="placements" className="space-y-6 mt-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <LayoutTemplate className="w-5 h-5" />
-                    Ad Placements
-                  </CardTitle>
-                  <CardDescription>
-                    Paste the full ad code for each placement. These codes will be inserted into your template.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  <FormField
-                    control={form.control}
-                    name="adCodes.header"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Header Ad</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder={`<ins class="adsbygoogle"
-     style="display:block"
-     data-ad-client="ca-pub-XXXXXXXX"
-     data-ad-slot="XXXXXXXX"
-     data-ad-format="auto"
-     data-full-width-responsive="true"></ins>
-<script>
-     (adsbygoogle = window.adsbygoogle || []).push({});
-</script>`}
-                            className="font-mono text-sm min-h-[150px]"
-                            {...field}
-                            value={field.value || ""}
-                            data-testid="textarea-ad-header"
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Ad displayed at the top of pages, below the header navigation
-                        </FormDescription>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="adCodes.beforeContent"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Before Content Ad</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Paste your ad code here..."
-                            className="font-mono text-sm min-h-[150px]"
-                            {...field}
-                            value={field.value || ""}
-                            data-testid="textarea-ad-before-content"
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Ad displayed before blog post content
-                        </FormDescription>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="adCodes.inArticle"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>In-Article Ad</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Paste your ad code here..."
-                            className="font-mono text-sm min-h-[150px]"
-                            {...field}
-                            value={field.value || ""}
-                            data-testid="textarea-ad-in-article"
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Ad displayed within blog post content (between paragraphs)
-                        </FormDescription>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="adCodes.afterContent"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>After Content Ad</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Paste your ad code here..."
-                            className="font-mono text-sm min-h-[150px]"
-                            {...field}
-                            value={field.value || ""}
-                            data-testid="textarea-ad-after-content"
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Ad displayed after blog post content
-                        </FormDescription>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="adCodes.sidebar"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Sidebar Ad</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Paste your ad code here..."
-                            className="font-mono text-sm min-h-[150px]"
-                            {...field}
-                            value={field.value || ""}
-                            data-testid="textarea-ad-sidebar"
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Ad displayed in the sidebar area
-                        </FormDescription>
-                      </FormItem>
-                    )}
-                  />
-
-                  <FormField
-                    control={form.control}
-                    name="adCodes.footer"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Footer Ad</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Paste your ad code here..."
-                            className="font-mono text-sm min-h-[150px]"
-                            {...field}
-                            value={field.value || ""}
-                            data-testid="textarea-ad-footer"
-                          />
-                        </FormControl>
-                        <FormDescription>
-                          Ad displayed at the bottom of pages, above the footer
-                        </FormDescription>
-                      </FormItem>
-                    )}
-                  />
-                </CardContent>
-              </Card>
+              <div className="grid gap-6">
+                <AdSlotFields 
+                  name="header" 
+                  label="Header Ad" 
+                  description="Displayed at the top of pages, below the header navigation"
+                  form={form}
+                />
+                
+                <AdSlotFields 
+                  name="beforeContent" 
+                  label="Before Content Ad" 
+                  description="Displayed before blog post content"
+                  form={form}
+                />
+                
+                <AdSlotFields 
+                  name="inArticle" 
+                  label="In-Article Ad" 
+                  description="Displayed within blog post content"
+                  form={form}
+                  showLayout={true}
+                />
+                
+                <AdSlotFields 
+                  name="afterContent" 
+                  label="After Content Ad" 
+                  description="Displayed after blog post content"
+                  form={form}
+                />
+                
+                <AdSlotFields 
+                  name="sidebar" 
+                  label="Sidebar Ad" 
+                  description="Displayed in the sidebar area"
+                  form={form}
+                />
+                
+                <AdSlotFields 
+                  name="footer" 
+                  label="Footer Ad" 
+                  description="Displayed at the bottom of pages"
+                  form={form}
+                />
+              </div>
             </TabsContent>
           </Tabs>
 
