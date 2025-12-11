@@ -143,6 +143,16 @@ export const siteConfigSchema = z.object({
 
 export type SiteConfig = z.infer<typeof siteConfigSchema>;
 
+// Ad slot configuration schema
+export const adSlotConfigSchema = z.object({
+  slot: z.string().default(""),
+  format: z.string().default("auto"),
+  layout: z.string().optional(),
+  responsive: z.boolean().default(true),
+});
+
+export type AdSlotConfig = z.infer<typeof adSlotConfigSchema>;
+
 // AdSense configuration schema
 export const adsenseConfigSchema = z.object({
   enabled: z.boolean().default(false),
@@ -150,21 +160,14 @@ export const adsenseConfigSchema = z.object({
   autoAdsEnabled: z.boolean().default(false),
   // Header script - injected into <head> tag
   headerScript: z.string().optional(),
-  // Ad code snippets for each placement
+  // Ad slot configurations for each placement
   adCodes: z.object({
-    header: z.string().optional(),
-    sidebar: z.string().optional(),
-    inArticle: z.string().optional(),
-    footer: z.string().optional(),
-    beforeContent: z.string().optional(),
-    afterContent: z.string().optional(),
-  }).optional(),
-  // Legacy slots (keeping for backward compatibility)
-  slots: z.object({
-    header: z.string().optional(),
-    sidebar: z.string().optional(),
-    inArticle: z.string().optional(),
-    footer: z.string().optional(),
+    header: adSlotConfigSchema.optional(),
+    sidebar: adSlotConfigSchema.optional(),
+    inArticle: adSlotConfigSchema.optional(),
+    footer: adSlotConfigSchema.optional(),
+    beforeContent: adSlotConfigSchema.optional(),
+    afterContent: adSlotConfigSchema.optional(),
   }).optional(),
 });
 
