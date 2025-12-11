@@ -148,6 +148,18 @@ export const adsenseConfigSchema = z.object({
   enabled: z.boolean().default(false),
   publisherId: z.string().default(""),
   autoAdsEnabled: z.boolean().default(false),
+  // Header script - injected into <head> tag
+  headerScript: z.string().optional(),
+  // Ad code snippets for each placement
+  adCodes: z.object({
+    header: z.string().optional(),
+    sidebar: z.string().optional(),
+    inArticle: z.string().optional(),
+    footer: z.string().optional(),
+    beforeContent: z.string().optional(),
+    afterContent: z.string().optional(),
+  }).optional(),
+  // Legacy slots (keeping for backward compatibility)
   slots: z.object({
     header: z.string().optional(),
     sidebar: z.string().optional(),
