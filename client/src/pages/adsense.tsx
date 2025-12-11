@@ -148,14 +148,17 @@ function AdSlotFields({
             render={({ field }) => (
               <FormItem>
                 <FormLabel>Layout</FormLabel>
-                <Select onValueChange={field.onChange} value={field.value || ""}>
+                <Select 
+                  onValueChange={(val) => field.onChange(val === "none" ? "" : val)} 
+                  value={field.value || "none"}
+                >
                   <FormControl>
                     <SelectTrigger data-testid={`select-layout-${name}`}>
                       <SelectValue placeholder="Select layout (optional)" />
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="none">None</SelectItem>
                     <SelectItem value="in-article">In-Article</SelectItem>
                     <SelectItem value="in-feed">In-Feed</SelectItem>
                   </SelectContent>
