@@ -26,7 +26,7 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
-import { DollarSign, Monitor, Code, LayoutTemplate, Save, RefreshCw, FileCode } from "lucide-react";
+import { DollarSign, Monitor, Code, LayoutTemplate, Save, RefreshCw, FileCode, FileText } from "lucide-react";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import type { Repository, AdsenseConfig } from "@shared/schema";
@@ -43,6 +43,7 @@ const adsenseFormSchema = z.object({
   publisherId: z.string(),
   autoAdsEnabled: z.boolean(),
   headerScript: z.string().optional(),
+  adsTxt: z.string().optional(),
   adCodes: z.object({
     header: adSlotSchema,
     sidebar: adSlotSchema,
@@ -206,6 +207,7 @@ export default function Adsense() {
       publisherId: "",
       autoAdsEnabled: false,
       headerScript: "",
+      adsTxt: "",
       adCodes: {
         header: defaultSlot,
         sidebar: defaultSlot,
@@ -220,6 +222,7 @@ export default function Adsense() {
       publisherId: adsenseData.data.publisherId ?? "",
       autoAdsEnabled: adsenseData.data.autoAdsEnabled ?? false,
       headerScript: adsenseData.data.headerScript ?? "",
+      adsTxt: adsenseData.data.adsTxt ?? "",
       adCodes: {
         header: getSlotValue(adsenseData.data, "header"),
         sidebar: getSlotValue(adsenseData.data, "sidebar"),
@@ -305,7 +308,7 @@ export default function Adsense() {
       <Form {...form}>
         <form onSubmit={form.handleSubmit((data) => saveMutation.mutate(data))} className="space-y-6">
           <Tabs defaultValue="general" className="w-full">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="general" data-testid="tab-general">
                 <Monitor className="w-4 h-4 mr-2" />
                 General
@@ -317,6 +320,10 @@ export default function Adsense() {
               <TabsTrigger value="placements" data-testid="tab-placements">
                 <LayoutTemplate className="w-4 h-4 mr-2" />
                 Placements
+              </TabsTrigger>
+              <TabsTrigger value="adstxt" data-testid="tab-adstxt">
+                <FileText className="w-4 h-4 mr-2" />
+                ads.txt
               </TabsTrigger>
             </TabsList>
 
@@ -483,6 +490,46 @@ export default function Adsense() {
                   form={form}
                 />
               </div>
+            </TabsContent>
+
+            <TabsContent value="adstxt" className="space-y-6 mt-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="w-5 h-5" />
+                    ads.txt File
+                  </CardTitle>
+                  <CardDescription>
+                    Configure your ads.txt file for ad verification. This file will be saved to /public/ads.txt
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <FormField
+                    control={form.control}
+                    name="adsTxt"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>ads.txt Content</FormLabel>
+                        <FormControl>
+                          <Textarea
+                            placeholder={`google.com, pub-XXXXXXXXXXXXXXXX, DIRECT, f08c47fec0942fa0`}
+                            className="font-mono text-sm min-h-[200px]"
+                            {...field}
+                            value={field.value || ""}
+                            data-testid="textarea-ads-txt"
+                          />
+                        </FormControl>
+                        <FormDescription>
+                          Enter the content for your ads.txt file. Get this from your AdSense account under Sites {">"} Ads.txt.
+                          <br />
+                          Example: google.com, pub-XXXXXXXXXXXXXXXX, DIRECT, f08c47fec0942fa0
+                        </FormDescription>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </CardContent>
+              </Card>
             </TabsContent>
           </Tabs>
 

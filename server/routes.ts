@@ -4108,7 +4108,28 @@ export async function registerRoutes(
   app.get("/api/adsense", async (req, res) => {
     try {
       const config = await storage.getAdsenseConfig();
-      res.json({ success: true, data: config || defaultAdsenseConfig });
+      const finalConfig = config || defaultAdsenseConfig;
+
+      // Try to fetch ads.txt content from repository
+      const repo = await storage.getRepository();
+      if (repo) {
+        try {
+          const octokit = await getGitHubClient();
+          const { data: adsTxtFile } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: "public/ads.txt",
+            ref: repo.activeBranch,
+          });
+          if (!Array.isArray(adsTxtFile) && adsTxtFile.type === "file" && adsTxtFile.content) {
+            finalConfig.adsTxt = Buffer.from(adsTxtFile.content, "base64").toString("utf-8");
+          }
+        } catch {
+          // ads.txt doesn't exist yet
+        }
+      }
+
+      res.json({ success: true, data: finalConfig });
     } catch (error) {
       res.json({ success: false, error: "Failed to get AdSense config" });
     }
@@ -4128,27 +4149,41 @@ export async function registerRoutes(
       }
       const config = parseResult.data;
       const configContent = JSON.stringify(config, null, 2);
-      const path = "src/config/adsense.json";
+      const configPath = "src/config/adsense.json";
+      const adsTxtPath = "public/ads.txt";
+      const adsTxtContent = config.adsTxt || "";
 
       // Check if Smart Deploy is active - if so, force queue mode
       const smartDeployActive = await isSmartDeployActive();
       const shouldQueue = req.body.queueOnly === true || smartDeployActive;
 
       if (shouldQueue) {
+        const operations: FileOperation[] = [
+          {
+            type: "write",
+            path: configPath,
+            content: configContent,
+            encoding: "utf-8",
+          },
+        ];
+
+        // Add ads.txt operation if content is provided
+        if (adsTxtContent.trim()) {
+          operations.push({
+            type: "write",
+            path: adsTxtPath,
+            content: adsTxtContent,
+            encoding: "utf-8",
+          });
+        }
+
         const draftChange: DraftChange = {
           id: crypto.randomUUID(),
           type: "settings_update",
           title: "Update AdSense configuration",
-          path,
+          path: configPath,
           content: configContent,
-          operations: [
-            {
-              type: "write",
-              path,
-              content: configContent,
-              encoding: "utf-8",
-            },
-          ],
+          operations,
           createdAt: new Date().toISOString(),
         };
 
@@ -4160,15 +4195,16 @@ export async function registerRoutes(
 
       const octokit = await getGitHubClient();
 
-      let sha: string | undefined;
+      // Save adsense.json
+      let configSha: string | undefined;
       try {
         const { data: currentFile } = await octokit.repos.getContent({
           owner: repo.owner,
           repo: repo.name,
-          path,
+          path: configPath,
           ref: repo.activeBranch,
         });
-        sha = Array.isArray(currentFile) ? undefined : currentFile.sha;
+        configSha = Array.isArray(currentFile) ? undefined : currentFile.sha;
       } catch {
         // File doesn't exist yet
       }
@@ -4176,12 +4212,38 @@ export async function registerRoutes(
       await octokit.repos.createOrUpdateFileContents({
         owner: repo.owner,
         repo: repo.name,
-        path,
+        path: configPath,
         message: req.body.commitMessage || "Update AdSense configuration",
         content: Buffer.from(configContent).toString("base64"),
-        sha,
+        sha: configSha,
         branch: repo.activeBranch,
       });
+
+      // Save ads.txt if content is provided
+      if (adsTxtContent.trim()) {
+        let adsTxtSha: string | undefined;
+        try {
+          const { data: currentAdsTxt } = await octokit.repos.getContent({
+            owner: repo.owner,
+            repo: repo.name,
+            path: adsTxtPath,
+            ref: repo.activeBranch,
+          });
+          adsTxtSha = Array.isArray(currentAdsTxt) ? undefined : currentAdsTxt.sha;
+        } catch {
+          // File doesn't exist yet
+        }
+
+        await octokit.repos.createOrUpdateFileContents({
+          owner: repo.owner,
+          repo: repo.name,
+          path: adsTxtPath,
+          message: "Update ads.txt",
+          content: Buffer.from(adsTxtContent).toString("base64"),
+          sha: adsTxtSha,
+          branch: repo.activeBranch,
+        });
+      }
 
       await storage.setAdsenseConfig(config);
       res.json({ success: true, data: config });

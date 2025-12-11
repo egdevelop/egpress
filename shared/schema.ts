@@ -160,6 +160,8 @@ export const adsenseConfigSchema = z.object({
   autoAdsEnabled: z.boolean().default(false),
   // Header script - injected into <head> tag
   headerScript: z.string().optional(),
+  // ads.txt content - saved to public/ads.txt
+  adsTxt: z.string().optional(),
   // Ad slot configurations for each placement
   adCodes: z.object({
     header: adSlotConfigSchema.optional(),
