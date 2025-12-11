@@ -82,19 +82,24 @@ export default function Adsense() {
       },
     },
     values: adsenseData?.data ? {
-      enabled: adsenseData.data.enabled,
-      publisherId: adsenseData.data.publisherId,
-      autoAdsEnabled: adsenseData.data.autoAdsEnabled,
-      headerScript: adsenseData.data.headerScript || "",
-      adCodes: adsenseData.data.adCodes || {
-        header: "",
-        sidebar: "",
-        inArticle: "",
-        footer: "",
-        beforeContent: "",
-        afterContent: "",
+      enabled: adsenseData.data.enabled ?? false,
+      publisherId: adsenseData.data.publisherId ?? "",
+      autoAdsEnabled: adsenseData.data.autoAdsEnabled ?? false,
+      headerScript: adsenseData.data.headerScript ?? "",
+      adCodes: {
+        header: adsenseData.data.adCodes?.header ?? "",
+        sidebar: adsenseData.data.adCodes?.sidebar ?? "",
+        inArticle: adsenseData.data.adCodes?.inArticle ?? "",
+        footer: adsenseData.data.adCodes?.footer ?? "",
+        beforeContent: adsenseData.data.adCodes?.beforeContent ?? "",
+        afterContent: adsenseData.data.adCodes?.afterContent ?? "",
       },
-      slots: adsenseData.data.slots || {},
+      slots: {
+        header: adsenseData.data.slots?.header ?? "",
+        sidebar: adsenseData.data.slots?.sidebar ?? "",
+        inArticle: adsenseData.data.slots?.inArticle ?? "",
+        footer: adsenseData.data.slots?.footer ?? "",
+      },
     } : undefined,
   });
 
