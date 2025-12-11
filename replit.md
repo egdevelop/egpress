@@ -44,7 +44,11 @@ The system comprises a React-based frontend and an Express.js backend.
   - Shadows: sm through xl
 - **Image Upload:** File upload component that stores images to GitHub /public/image directory, returning paths accessible after build (/image/filename).
 - **File Management:** A file browser for navigating and editing repository files with syntax highlighting.
-- **AdSense Manager:** Configuration for Google AdSense with multiple ad slot placements.
+- **AdSense Manager (Enhanced):** Full ad code insertion support with tabbed interface:
+  - General Settings: Enable/disable AdSense, Publisher ID, Auto Ads toggle
+  - Scripts Tab: Header script textarea for injecting AdSense script into `<head>` tag
+  - Placements Tab: Full HTML ad code insertion for 6 positions (header, before content, in-article, after content, sidebar, footer)
+  - Backward compatible with legacy slot IDs
 - **Static Pages Editor:** Edits non-blog pages.
 - **AI Post Generation:** Leverages Google Gemini AI for generating blog posts.
 - **Google Search Console Integration:** Service account integration for site selection, URL indexing, sitemap submission, and domain verification, with encrypted storage for credentials.
